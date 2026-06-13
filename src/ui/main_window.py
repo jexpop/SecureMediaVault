@@ -164,7 +164,7 @@ class MainWindow(QMainWindow):
         )
 
         self.gallery.setGridSize(
-            QSize(220, 240)
+            QSize(220, 320)
         )
 
         self.gallery.setResizeMode(
@@ -173,6 +173,10 @@ class MainWindow(QMainWindow):
 
         self.gallery.setSpacing(
             12
+        )
+
+        self.gallery.setWordWrap(
+            True
         )
 
         self.gallery.itemDoubleClicked.connect(
@@ -315,15 +319,11 @@ class MainWindow(QMainWindow):
             for t in tags
         ]
 
-        max_visible = 6
+        max_visible = 16
 
         visible = names[
             :max_visible
         ]
-
-        text = " • ".join(
-            visible
-        )
 
         remaining = (
             len(names)
@@ -332,11 +332,24 @@ class MainWindow(QMainWindow):
 
         if remaining > 0:
 
-            text += (
-                f" +{remaining}"
+            visible.append(
+                f"+{remaining} more"
             )
 
-        return text
+        # Group tags into lines of up to 6, joined by " • "
+        per_line = 6
+
+        lines = []
+
+        for i in range(0, len(visible), per_line):
+
+            chunk = visible[i:i + per_line]
+
+            lines.append(
+                " • ".join(chunk)
+            )
+
+        return "\n".join(lines)
 
     # =====================================================
     # POPULATE GALLERY ITEM
