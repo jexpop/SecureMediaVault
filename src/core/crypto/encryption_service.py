@@ -20,6 +20,30 @@ class EncryptionService:
         password: str
     ):
 
+        with open(source_path, "rb") as f:
+            data = f.read()
+
+        self.encrypt_bytes(
+            data=data,
+            target_path=target_path,
+            password=password
+        )
+
+    def encrypt_bytes(
+        self,
+        data: bytes,
+        target_path: str,
+        password: str
+    ):
+        """
+        Encrypts raw bytes (already in memory) and writes
+        them to target_path using the SMV1 format
+        (header + salt + nonce + ciphertext).
+
+        Used both for importing new files and for
+        re-encrypting existing media during a password change.
+        """
+
         salt = self.key_manager.generate_salt()
 
         key = self.key_manager.derive_key(
@@ -30,9 +54,6 @@ class EncryptionService:
         aesgcm = AESGCM(key)
 
         nonce = os.urandom(12)
-
-        with open(source_path, "rb") as f:
-            data = f.read()
 
         encrypted_data = aesgcm.encrypt(
             nonce,

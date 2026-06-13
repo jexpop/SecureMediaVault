@@ -54,6 +54,10 @@ from src.ui.widgets.tag_panel import (
     TagPanel
 )
 
+from src.ui.change_password_window import (
+    ChangePasswordWindow
+)
+
 
 class MainWindow(QMainWindow):
 
@@ -126,6 +130,19 @@ class MainWindow(QMainWindow):
         )
 
         # =====================================================
+        # CHANGE PASSWORD BUTTON
+        # =====================================================
+        self.change_password_button = (
+            QPushButton(
+                "Change Password"
+            )
+        )
+
+        self.change_password_button.clicked.connect(
+            self.open_change_password
+        )
+
+        # =====================================================
         # GALLERY
         # =====================================================
         self.gallery = QListWidget()
@@ -191,6 +208,10 @@ class MainWindow(QMainWindow):
         )
 
         layout.addWidget(
+            self.change_password_button
+        )
+
+        layout.addWidget(
             self.tag_panel
         )
 
@@ -209,8 +230,20 @@ class MainWindow(QMainWindow):
         )
 
         self.preview_window = None
+        self.change_password_window = None
 
         self.load_media()
+
+    # =====================================================
+    # CHANGE PASSWORD
+    # =====================================================
+    def open_change_password(self):
+
+        self.change_password_window = (
+            ChangePasswordWindow()
+        )
+
+        self.change_password_window.show()
 
     # =====================================================
     # MEDIA SELECTED
@@ -273,7 +306,7 @@ class MainWindow(QMainWindow):
             return "[untagged]"
 
         names = [
-            t.name
+            t.display_name
             for t in tags
         ]
 
@@ -352,7 +385,7 @@ class MainWindow(QMainWindow):
             )
 
             item.setToolTip(
-                media.original_filename
+                media.display_filename
             )
 
             pixmap = (
@@ -461,7 +494,7 @@ class MainWindow(QMainWindow):
                 self,
                 "Delete Media",
                 f'Are you sure you want to permanently '
-                f'delete "{media.original_filename}"?\n\n'
+                f'delete "{media.display_filename}"?\n\n'
                 f'This action cannot be undone.\n'
                 f'The file, database record, and all tags '
                 f'will be removed.',
@@ -524,6 +557,13 @@ class MainWindow(QMainWindow):
             )
         )
 
+        media_items = (
+            self.media_service
+            .decorate_media_list(
+                media_items
+            )
+        )
+
         self.current_media_items = (
             media_items
         )
@@ -548,7 +588,7 @@ class MainWindow(QMainWindow):
             )
 
             item.setToolTip(
-                media.original_filename
+                media.display_filename
             )
 
             pixmap = (

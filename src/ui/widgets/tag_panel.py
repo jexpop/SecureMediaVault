@@ -218,11 +218,11 @@ class TagPanel(QWidget):
         for tag in all_tags:
 
             self.filter_combo.addItem(
-                tag.name
+                tag.display_name
             )
 
             self.available_tags_combo.addItem(
-                tag.name
+                tag.display_name
             )
 
         filter_index = (
@@ -285,7 +285,7 @@ class TagPanel(QWidget):
         for tag in tags:
 
             self.image_tags_combo.addItem(
-                tag.name
+                tag.display_name
             )
 
     # =====================================================

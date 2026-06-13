@@ -15,6 +15,10 @@ from src.core.config.vault_session import (
     VaultSession
 )
 
+from src.core.crypto.key_manager import (
+    KeyManager
+)
+
 from src.ui.main_window import (
     MainWindow
 )
@@ -118,6 +122,24 @@ class SetupWindow(QWidget):
 
         VaultSession.set_password(
             password
+        )
+
+        # -------------------------
+        # DERIVE METADATA KEY
+        # -------------------------
+        key_manager = KeyManager()
+
+        metadata_salt = (
+            self.vault.get_metadata_salt()
+        )
+
+        metadata_key = key_manager.derive_key(
+            password=password,
+            salt=metadata_salt
+        )
+
+        VaultSession.set_metadata_key(
+            metadata_key
         )
 
         self.main_window = (

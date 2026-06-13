@@ -3,12 +3,42 @@ from src.database.db_manager import SessionLocal
 from src.database.models.tag_models import Tag
 from src.database.models.media_model import Media
 
+from src.core.crypto.string_crypto_service import StringCryptoService
+from src.core.config.vault_session import VaultSession
+
 
 class TagService:
 
     def __init__(self):
 
         self.session = SessionLocal()
+        self.string_crypto = StringCryptoService()
+
+    # -------------------------
+    # INTERNAL HELPERS
+    # -------------------------
+    def _metadata_key(self):
+        return VaultSession.get_metadata_key()
+
+    def _hash(self, tag_name: str) -> str:
+        return self.string_crypto.hash_value(
+            tag_name,
+            self._metadata_key()
+        )
+
+    def _attach_display_name(self, tag: Tag):
+
+        try:
+            tag.display_name = (
+                self.string_crypto.decrypt(
+                    tag.name_encrypted,
+                    self._metadata_key()
+                )
+            )
+        except Exception:
+            tag.display_name = "[unreadable]"
+
+        return tag
 
     # -------------------------
     # ADD TAG TO MEDIA
@@ -28,10 +58,12 @@ class TagService:
         if not tag_name:
             return
 
+        name_hash = self._hash(tag_name)
+
         tag = (
             self.session.query(Tag)
             .filter_by(
-                name=tag_name
+                name_hash=name_hash
             )
             .first()
         )
@@ -39,13 +71,16 @@ class TagService:
         if not tag:
 
             tag = Tag(
-                name=tag_name
+                name_hash=name_hash,
+                name_encrypted=(
+                    self.string_crypto.encrypt(
+                        tag_name,
+                        self._metadata_key()
+                    )
+                )
             )
 
-            self.session.add(
-                tag
-            )
-
+            self.session.add(tag)
             self.session.commit()
 
         managed_media = (
@@ -83,6 +118,8 @@ class TagService:
             .lower()
         )
 
+        name_hash = self._hash(tag_name)
+
         managed_media = (
             self.session
             .query(Media)
@@ -99,7 +136,7 @@ class TagService:
             self.session
             .query(Tag)
             .filter_by(
-                name=tag_name
+                name_hash=name_hash
             )
             .first()
         )
@@ -126,27 +163,21 @@ class TagService:
         self,
         tag_name: str
     ) -> bool:
-        """
-        Check if a tag is associated with any media.
-        
-        Args:
-            tag_name: The name of the tag to check
-            
-        Returns:
-            True if the tag has associated media, False otherwise
-        """
+
         tag_name = (
             tag_name
             .strip()
             .lower()
         )
 
+        name_hash = self._hash(tag_name)
+
         media_count = (
             self.session
             .query(Media)
             .join(Media.tags)
             .filter(
-                Tag.name == tag_name
+                Tag.name_hash == name_hash
             )
             .count()
         )
@@ -167,10 +198,12 @@ class TagService:
             .lower()
         )
 
+        name_hash = self._hash(tag_name)
+
         tag = (
             self.session.query(Tag)
             .filter_by(
-                name=tag_name
+                name_hash=name_hash
             )
             .first()
         )
@@ -178,10 +211,7 @@ class TagService:
         if not tag:
             return False
 
-        self.session.delete(
-            tag
-        )
-
+        self.session.delete(tag)
         self.session.commit()
 
         return True
@@ -191,14 +221,20 @@ class TagService:
     # -------------------------
     def get_all_tags(self):
 
-        return (
+        tags = (
             self.session
             .query(Tag)
-            .order_by(
-                Tag.name.asc()
-            )
             .all()
         )
+
+        for tag in tags:
+            self._attach_display_name(tag)
+
+        tags.sort(
+            key=lambda t: t.display_name
+        )
+
+        return tags
 
     # -------------------------
     # FILTER BY TAG
@@ -214,12 +250,14 @@ class TagService:
             .lower()
         )
 
+        name_hash = self._hash(tag_name)
+
         return (
             self.session
             .query(Media)
             .join(Media.tags)
             .filter(
-                Tag.name == tag_name
+                Tag.name_hash == name_hash
             )
             .all()
         )
@@ -244,4 +282,9 @@ class TagService:
         if not media:
             return []
 
-        return media.tags
+        tags = media.tags
+
+        for tag in tags:
+            self._attach_display_name(tag)
+
+        return tags

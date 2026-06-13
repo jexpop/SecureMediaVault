@@ -11,12 +11,22 @@ class Tag(Base):
         primary_key=True
     )
 
-    name = Column(
+    # Deterministic HMAC-SHA256 hash of the (stripped, lowercased)
+    # tag name, derived from the vault metadata key.
+    # Used for uniqueness and lookups, since the real name
+    # is never stored in clear.
+    name_hash = Column(
         String,
         unique=True,
         nullable=False,
         index=True
     )
 
+    # Encrypted tag name (AES-256-GCM, vault metadata key).
+    name_encrypted = Column(
+        String,
+        nullable=False
+    )
+
     def __repr__(self):
-        return f"<Tag {self.name}>"
+        return f"<Tag hash={self.name_hash[:8]}...>"
