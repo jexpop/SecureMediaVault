@@ -1,0 +1,58 @@
+# --- Python básico ---
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pdb
+
+# --- Entornos virtuales ---
+venv/
+env/
+.venv/
+.virtualenv/
+
+# --- Python portable en la raíz ---
+python/
+
+# --- Herramientas de build ---
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# --- Logs y dumps ---
+*.log
+*.out
+*.err
+
+# --- Configuración local ---
+*.env
+.env.*
+*.ini
+*.local
+*.cfg
+
+# --- IDEs ---
+# VSCode
+.vscode/
+# PyCharm
+.idea/
+
+# --- Archivos temporales ---
+*.tmp
+*.temp
+*.bak
+*.swp
+*.swo
+
+# --- Bases de datos locales ---
+*.sqlite3
+*.db
+
+# --- Carpetas de tu proyecto que NO deben subirse ---
+# (añade aquí si tienes carpetas generadas automáticamente)
+*.enc
+logs/
+temp/
+tests/
+vault/
