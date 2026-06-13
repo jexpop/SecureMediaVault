@@ -5,6 +5,9 @@ from src.core.crypto.string_crypto_service import StringCryptoService
 from src.core.storage.media_storage import MediaStorage
 from src.core.config.vault_session import VaultSession
 
+from src.core.services.tag_service import TagService
+from src.core.services.media_category import classify_extension
+
 from src.database.repositories.media_repository import MediaRepository
 from src.database.models.media_model import Media
 
@@ -17,6 +20,7 @@ class ImportService:
         self.encryption_service = EncryptionService()
         self.string_crypto = StringCryptoService()
         self.repository = MediaRepository()
+        self.tag_service = TagService()
 
     def import_file(self, source_file: str, password: str):
 
@@ -35,13 +39,16 @@ class ImportService:
 
         metadata_key = VaultSession.get_metadata_key()
 
+        extension = source.suffix.replace(".", "")
+        category = classify_extension(extension)
+
         encrypted_filename = self.string_crypto.encrypt(
             source.name,
             metadata_key
         )
 
         encrypted_media_type = self.string_crypto.encrypt(
-            source.suffix.replace(".", ""),
+            extension,
             metadata_key
         )
 
@@ -54,9 +61,13 @@ class ImportService:
 
         saved = self.repository.save(media)
 
+        # Auto-assign "Images" / "Videos" system tag (mutually exclusive)
+        self.tag_service.set_media_type_tag(saved, category)
+
         return {
             "id": saved.id,
             "uuid": saved.uuid,
             "encrypted_path": saved.encrypted_path,
-            "original_filename": source.name
+            "original_filename": source.name,
+            "category": category
         }

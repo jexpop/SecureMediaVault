@@ -42,12 +42,20 @@ from src.core.services.delete_service import (
     DeleteService
 )
 
+from src.core.services.media_category import (
+    classify_extension
+)
+
 from src.core.config.vault_session import (
     VaultSession
 )
 
 from src.ui.preview_window import (
     PreviewWindow
+)
+
+from src.ui.video_player_window import (
+    VideoPlayerWindow
 )
 
 from src.ui.widgets.tag_panel import (
@@ -188,8 +196,8 @@ class MainWindow(QMainWindow):
             )
         )
 
-        self.tag_panel.filter_combo.currentTextChanged.connect(
-            self.on_filter_selected
+        self.tag_panel.filterChanged.connect(
+            self.on_filter_changed
         )
 
         # =====================================================
@@ -230,6 +238,7 @@ class MainWindow(QMainWindow):
         )
 
         self.preview_window = None
+        self.video_player_window = None
         self.change_password_window = None
 
         self.load_media()
@@ -272,26 +281,22 @@ class MainWindow(QMainWindow):
         )
 
     # =====================================================
-    # FILTER SELECTED
+    # FILTER CHANGED (multi-tag, AND)
     # =====================================================
-    def on_filter_selected(
+    def on_filter_changed(
         self,
-        tag_name
+        tag_names
     ):
 
-        tag_name = (
-            tag_name
-            .strip()
-        )
-
-        if not tag_name:
+        if not tag_names:
 
             self.load_media()
-            return
 
-        self.filter_by_tag(
-            tag_name
-        )
+        else:
+
+            self.filter_by_tags(
+                tag_names
+            )
 
     # =====================================================
     # FORMAT TAGS
@@ -334,6 +339,53 @@ class MainWindow(QMainWindow):
         return text
 
     # =====================================================
+    # POPULATE GALLERY ITEM
+    # =====================================================
+    def _populate_gallery_item(self, media, password):
+
+        item = QListWidgetItem()
+
+        tags = (
+            self.tag_service
+            .get_tags_for_media(
+                media.id
+            )
+        )
+
+        item.setText(
+            self.format_tags(
+                tags
+            )
+        )
+
+        item.setToolTip(
+            media.display_filename
+        )
+
+        pixmap = (
+            self.thumbnail_service
+            .get_gallery_pixmap(
+                media=media,
+                password=password
+            )
+        )
+
+        item.setIcon(
+            QIcon(
+                pixmap
+            )
+        )
+
+        item.setData(
+            Qt.UserRole,
+            media
+        )
+
+        self.gallery.addItem(
+            item
+        )
+
+    # =====================================================
     # LOAD MEDIA
     # =====================================================
     def load_media(self):
@@ -367,51 +419,9 @@ class MainWindow(QMainWindow):
             if status != "ok":
                 continue
 
-            item = (
-                QListWidgetItem()
-            )
-
-            tags = (
-                self.tag_service
-                .get_tags_for_media(
-                    media.id
-                )
-            )
-
-            item.setText(
-                self.format_tags(
-                    tags
-                )
-            )
-
-            item.setToolTip(
-                media.display_filename
-            )
-
-            pixmap = (
-                self.thumbnail_service
-                .get_pixmap(
-                    encrypted_path=
-                    media.encrypted_path,
-
-                    password=
-                    password
-                )
-            )
-
-            item.setIcon(
-                QIcon(
-                    pixmap
-                )
-            )
-
-            item.setData(
-                Qt.UserRole,
-                media
-            )
-
-            self.gallery.addItem(
-                item
+            self._populate_gallery_item(
+                media,
+                password
             )
 
     # =====================================================
@@ -419,17 +429,15 @@ class MainWindow(QMainWindow):
     # =====================================================
     def refresh_current_view(self):
 
-        current_filter = (
+        selected_tags = (
             self.tag_panel
-            .filter_combo
-            .currentText()
-            .strip()
+            .get_selected_filter_tags()
         )
 
-        if current_filter:
+        if selected_tags:
 
-            self.filter_by_tag(
-                current_filter
+            self.filter_by_tags(
+                selected_tags
             )
 
         else:
@@ -536,11 +544,11 @@ class MainWindow(QMainWindow):
             )
 
     # =====================================================
-    # FILTER BY TAG
+    # FILTER BY TAGS (AND - must have ALL selected tags)
     # =====================================================
-    def filter_by_tag(
+    def filter_by_tags(
         self,
-        tag_name
+        tag_names
     ):
 
         self.gallery.clear()
@@ -552,8 +560,8 @@ class MainWindow(QMainWindow):
 
         media_items = (
             self.tag_service
-            .get_media_by_tag(
-                tag_name
+            .get_media_by_tags(
+                tag_names
             )
         )
 
@@ -570,55 +578,13 @@ class MainWindow(QMainWindow):
 
         for media in media_items:
 
-            item = (
-                QListWidgetItem()
-            )
-
-            tags = (
-                self.tag_service
-                .get_tags_for_media(
-                    media.id
-                )
-            )
-
-            item.setText(
-                self.format_tags(
-                    tags
-                )
-            )
-
-            item.setToolTip(
-                media.display_filename
-            )
-
-            pixmap = (
-                self.thumbnail_service
-                .get_pixmap(
-                    encrypted_path=
-                    media.encrypted_path,
-
-                    password=
-                    password
-                )
-            )
-
-            item.setIcon(
-                QIcon(
-                    pixmap
-                )
-            )
-
-            item.setData(
-                Qt.UserRole,
-                media
-            )
-
-            self.gallery.addItem(
-                item
+            self._populate_gallery_item(
+                media,
+                password
             )
 
     # =====================================================
-    # PREVIEW
+    # PREVIEW / PLAYBACK
     # =====================================================
     def open_preview(
         self,
@@ -634,14 +600,44 @@ class MainWindow(QMainWindow):
             .get_password()
         )
 
-        media_items = (
-            self.current_media_items
+        category = classify_extension(
+            media.display_media_type
         )
+
+        # -------------------------
+        # VIDEO -> REUSABLE PLAYER WINDOW
+        # -------------------------
+        if category == "video":
+
+            if self.video_player_window is None:
+
+                self.video_player_window = (
+                    VideoPlayerWindow()
+                )
+
+            self.video_player_window.load_media(
+                media=media,
+                password=password
+            )
+
+            self.video_player_window.show()
+            self.video_player_window.raise_()
+            self.video_player_window.activateWindow()
+
+            return
+
+        # -------------------------
+        # IMAGE -> PREVIEW (navigate within images only)
+        # -------------------------
+        image_items = [
+            m for m in self.current_media_items
+            if classify_extension(m.display_media_type) == "image"
+        ]
 
         current_index = 0
 
         for i, m in enumerate(
-            media_items
+            image_items
         ):
 
             if m.id == media.id:
@@ -652,7 +648,7 @@ class MainWindow(QMainWindow):
         self.preview_window = (
             PreviewWindow(
                 media_list=
-                media_items,
+                image_items,
 
                 current_index=
                 current_index,

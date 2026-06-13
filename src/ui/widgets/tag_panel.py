@@ -5,11 +5,21 @@ from PySide6.QtWidgets import (
     QComboBox,
     QLineEdit,
     QPushButton,
+    QToolButton,
+    QMenu,
+    QWidgetAction,
+    QCheckBox,
     QMessageBox
 )
 
+from PySide6.QtCore import Signal
+
 
 class TagPanel(QWidget):
+
+    # Emitted whenever the set of checked filter tags changes.
+    # Carries a list of selected tag display names.
+    filterChanged = Signal(list)
 
     def __init__(
         self,
@@ -29,6 +39,8 @@ class TagPanel(QWidget):
 
         self.current_media = None
 
+        self._filter_checkboxes = {}
+
         self.build_ui()
 
         self.load_tags()
@@ -43,14 +55,32 @@ class TagPanel(QWidget):
         )
 
         # =================================================
-        # FILTER
+        # FILTER (multi-select)
         # =================================================
-        self.filter_combo = (
-            QComboBox()
+        self.filter_button = QToolButton()
+
+        self.filter_button.setText(
+            "Filter: All"
         )
 
-        self.filter_combo.setMinimumWidth(
-            160
+        self.filter_button.setPopupMode(
+            QToolButton.InstantPopup
+        )
+
+        self.filter_menu = QMenu(
+            self.filter_button
+        )
+
+        self.filter_button.setMenu(
+            self.filter_menu
+        )
+
+        self.clear_filter_button = (
+            QPushButton("Clear")
+        )
+
+        self.clear_filter_button.clicked.connect(
+            self.clear_filters
         )
 
         # =================================================
@@ -130,7 +160,11 @@ class TagPanel(QWidget):
         )
 
         layout.addWidget(
-            self.filter_combo
+            self.filter_button
+        )
+
+        layout.addWidget(
+            self.clear_filter_button
         )
 
         layout.addSpacing(
@@ -186,9 +220,9 @@ class TagPanel(QWidget):
     # =====================================================
     def load_tags(self):
 
-        current_filter = (
-            self.filter_combo
-            .currentText()
+        # Preserve the currently selected filter tags
+        previously_selected = set(
+            self.get_selected_filter_tags()
         )
 
         selected_available = (
@@ -196,19 +230,18 @@ class TagPanel(QWidget):
             .currentText()
         )
 
-        self.filter_combo.blockSignals(
-            True
-        )
-
         self.available_tags_combo.blockSignals(
             True
         )
 
-        self.filter_combo.clear()
-        self.filter_combo.addItem("")
-
         self.available_tags_combo.clear()
         self.available_tags_combo.addItem("")
+
+        # -------------------------
+        # REBUILD FILTER MENU
+        # -------------------------
+        self.filter_menu.clear()
+        self._filter_checkboxes = {}
 
         all_tags = (
             self.tag_service
@@ -217,25 +250,43 @@ class TagPanel(QWidget):
 
         for tag in all_tags:
 
-            self.filter_combo.addItem(
+            # Available (add existing / delete): exclude system tags
+            if not tag.is_system:
+
+                self.available_tags_combo.addItem(
+                    tag.display_name
+                )
+
+            # Filter menu: include everything
+            checkbox = QCheckBox(
                 tag.display_name
             )
 
-            self.available_tags_combo.addItem(
+            checkbox.setChecked(
+                tag.display_name in previously_selected
+            )
+
+            checkbox.stateChanged.connect(
+                self._on_filter_changed
+            )
+
+            action = QWidgetAction(
+                self.filter_menu
+            )
+
+            action.setDefaultWidget(
+                checkbox
+            )
+
+            self.filter_menu.addAction(
+                action
+            )
+
+            self._filter_checkboxes[
                 tag.display_name
-            )
+            ] = checkbox
 
-        filter_index = (
-            self.filter_combo.findText(
-                current_filter
-            )
-        )
-
-        if filter_index >= 0:
-
-            self.filter_combo.setCurrentIndex(
-                filter_index
-            )
+        self._update_filter_button_text()
 
         available_index = (
             self.available_tags_combo.findText(
@@ -249,13 +300,72 @@ class TagPanel(QWidget):
                 available_index
             )
 
-        self.filter_combo.blockSignals(
-            False
-        )
-
         self.available_tags_combo.blockSignals(
             False
         )
+
+    # =====================================================
+    # MULTI-TAG FILTER
+    # =====================================================
+    def get_selected_filter_tags(self):
+
+        return [
+            name
+            for name, checkbox in self._filter_checkboxes.items()
+            if checkbox.isChecked()
+        ]
+
+    def _update_filter_button_text(self):
+
+        selected = (
+            self.get_selected_filter_tags()
+        )
+
+        if not selected:
+
+            self.filter_button.setText(
+                "Filter: All"
+            )
+
+        elif len(selected) == 1:
+
+            self.filter_button.setText(
+                f"Filter: {selected[0]}"
+            )
+
+        else:
+
+            self.filter_button.setText(
+                f"Filter: {len(selected)} tags"
+            )
+
+    def _on_filter_changed(self, _state=None):
+
+        self._update_filter_button_text()
+
+        self.filterChanged.emit(
+            self.get_selected_filter_tags()
+        )
+
+    def clear_filters(self):
+
+        any_checked = False
+
+        for checkbox in self._filter_checkboxes.values():
+
+            if checkbox.isChecked():
+
+                checkbox.blockSignals(True)
+                checkbox.setChecked(False)
+                checkbox.blockSignals(False)
+
+                any_checked = True
+
+        self._update_filter_button_text()
+
+        if any_checked:
+
+            self.filterChanged.emit([])
 
     # =====================================================
     # SET SELECTED MEDIA
@@ -350,10 +460,22 @@ class TagPanel(QWidget):
         if not tag_name:
             return
 
-        self.tag_service.add_tag_to_media(
+        success = self.tag_service.add_tag_to_media(
             self.current_media,
             tag_name
         )
+
+        if not success:
+
+            QMessageBox.information(
+                self,
+                "Reserved Tag",
+                f'"{tag_name}" is reserved for automatic '
+                f'image/video classification and cannot be '
+                f'added manually.'
+            )
+
+            return
 
         self.new_tag_input.clear()
 
@@ -382,10 +504,21 @@ class TagPanel(QWidget):
         if not tag_name:
             return
 
-        self.tag_service.remove_tag_from_media(
+        success = self.tag_service.remove_tag_from_media(
             self.current_media,
             tag_name
         )
+
+        if not success:
+
+            QMessageBox.information(
+                self,
+                "Protected Tag",
+                f'"{tag_name}" is assigned automatically '
+                f'and cannot be removed.'
+            )
+
+            return
 
         self.set_selected_media(
             self.current_media
@@ -443,9 +576,19 @@ class TagPanel(QWidget):
         if result != QMessageBox.Yes:
             return
 
-        self.tag_service.delete_tag(
+        success = self.tag_service.delete_tag(
             tag_name
         )
+
+        if not success:
+
+            QMessageBox.information(
+                self,
+                "Protected Tag",
+                f'"{tag_name}" cannot be deleted.'
+            )
+
+            return
 
         self.load_tags()
 

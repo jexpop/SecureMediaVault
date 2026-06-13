@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String
+from sqlalchemy import Column, Integer, String, Boolean
 from src.database.db_manager import Base
 
 
@@ -13,8 +13,6 @@ class Tag(Base):
 
     # Deterministic HMAC-SHA256 hash of the (stripped, lowercased)
     # tag name, derived from the vault metadata key.
-    # Used for uniqueness and lookups, since the real name
-    # is never stored in clear.
     name_hash = Column(
         String,
         unique=True,
@@ -28,5 +26,17 @@ class Tag(Base):
         nullable=False
     )
 
+    # System tags ("images", "videos") are assigned automatically
+    # on import and cannot be edited, removed from media, or
+    # deleted by the user.
+    is_system = Column(
+        Boolean,
+        nullable=False,
+        default=False
+    )
+
     def __repr__(self):
-        return f"<Tag hash={self.name_hash[:8]}...>"
+        return (
+            f"<Tag hash={self.name_hash[:8]}... "
+            f"system={self.is_system}>"
+        )

@@ -57,7 +57,7 @@ class PreviewWindow(QWidget):
 
         media = self.current_media()
 
-        self._pixmap = self.thumbnail_service.get_pixmap(
+        self._pixmap = self.thumbnail_service.get_image_pixmap(
             encrypted_path=media.encrypted_path,
             password=self.password
         )
