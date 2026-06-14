@@ -48,6 +48,10 @@ from src.core.services.media_category import (
     classify_extension
 )
 
+from src.core.services.temp_media_service import (
+    TempMediaService
+)
+
 from src.core.config.vault_session import (
     VaultSession
 )
@@ -115,6 +119,10 @@ class MainWindow(QMainWindow):
 
         self.delete_service = (
             DeleteService()
+        )
+
+        self.temp_media_service = (
+            TempMediaService()
         )
 
         # =====================================================
@@ -562,7 +570,11 @@ class MainWindow(QMainWindow):
             QFileDialog
             .getOpenFileName(
                 self,
-                "Select file"
+                "Select file",
+                "",
+                "",
+                options=
+                QFileDialog.DontUseNativeDialog
             )
         )
 
@@ -596,7 +608,44 @@ class MainWindow(QMainWindow):
             password=password
         )
 
+        self._secure_delete_original(
+            file_path,
+            filename
+        )
+
         self.refresh_current_view()
+
+    # =====================================================
+    # SECURE DELETE OF ORIGINAL FILE AFTER IMPORT
+    # =====================================================
+    def _secure_delete_original(
+        self,
+        file_path,
+        filename
+    ):
+        """
+        Securely deletes the original file (overwrite + unlink)
+        right after a successful import, without asking for
+        confirmation.
+        """
+
+        success = (
+            self.temp_media_service
+            .secure_delete(
+                file_path
+            )
+        )
+
+        if not success:
+
+            QMessageBox.warning(
+                self,
+                "Error",
+                f'Could not delete the original file '
+                f'"{filename}".\n\n'
+                f'It may be in use by another program. '
+                f'You can delete it manually.'
+            )
 
     # =====================================================
     # DELETE SELECTED MEDIA
