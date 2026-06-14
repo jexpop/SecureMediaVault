@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from PySide6.QtWidgets import (
     QMainWindow,
     QPushButton,
@@ -471,6 +473,23 @@ class MainWindow(QMainWindow):
         )
 
         if not file_path:
+            return
+
+        filename = (
+            Path(file_path).name
+        )
+
+        if self.media_service.filename_exists(filename):
+
+            QMessageBox.warning(
+                self,
+                "Duplicate File",
+                f'A file named "{filename}" already exists '
+                f'in the vault.\n\n'
+                f'Please rename the file before importing, '
+                f'or choose a different file.'
+            )
+
             return
 
         password = (

@@ -1,4 +1,7 @@
+Python 3.12.*
 cryptography
 argon2-cffi
 PySide6 
 SQLAlchemy 
+
+Folders fython, vault
