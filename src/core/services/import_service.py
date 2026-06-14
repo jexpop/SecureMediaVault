@@ -7,6 +7,7 @@ from src.core.config.vault_session import VaultSession
 
 from src.core.services.tag_service import TagService
 from src.core.services.media_category import classify_extension
+from src.core.services.video_preview_service import VideoPreviewService
 
 from src.database.repositories.media_repository import MediaRepository
 from src.database.models.media_model import Media
@@ -21,6 +22,7 @@ class ImportService:
         self.string_crypto = StringCryptoService()
         self.repository = MediaRepository()
         self.tag_service = TagService()
+        self.video_preview_service = VideoPreviewService()
 
     def import_file(self, source_file: str, password: str):
 
@@ -63,6 +65,17 @@ class ImportService:
 
         # Auto-assign "Images" / "Videos" system tag (mutually exclusive)
         self.tag_service.set_media_type_tag(saved, category)
+
+        # Generate encrypted preview assets for videos
+        # (static frame + short looping GIF). Failure here is
+        # non-fatal: the gallery falls back to a generic icon.
+        if category == "video":
+
+            self.video_preview_service.generate_previews(
+                encrypted_video_path=target_path,
+                password=password,
+                extension=extension
+            )
 
         return {
             "id": saved.id,

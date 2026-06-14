@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from PySide6.QtGui import (
     QPixmap,
     QPainter,
@@ -29,15 +31,9 @@ class ThumbnailService:
         )
 
     # -------------------------
-    # GALLERY THUMBNAIL
+    # GALLERY THUMBNAIL (images + video static fallback)
     # -------------------------
     def get_gallery_pixmap(self, media, password: str) -> QPixmap:
-        """
-        Returns the pixmap to show in the gallery:
-          - Images: decrypted and loaded directly.
-          - Videos: a generic placeholder icon. The video
-            content is NEVER decrypted just to build a thumbnail.
-        """
 
         category = classify_extension(
             media.display_media_type
@@ -48,6 +44,14 @@ class ThumbnailService:
                 media.encrypted_path,
                 password
             )
+
+        static_pixmap = self.get_video_static_pixmap(
+            media.encrypted_path,
+            password
+        )
+
+        if static_pixmap is not None:
+            return static_pixmap
 
         return self._video_placeholder_pixmap()
 
@@ -74,7 +78,76 @@ class ThumbnailService:
         return pixmap
 
     # -------------------------
-    # VIDEO PLACEHOLDER
+    # VIDEO STATIC PREVIEW FRAME
+    # -------------------------
+    def get_video_static_pixmap(
+        self,
+        encrypted_path: str,
+        password: str
+    ):
+        """
+        Returns the decrypted static preview frame as a QPixmap,
+        or None if no preview file exists / decryption fails.
+        """
+
+        static_path = encrypted_path + "_static.enc"
+
+        if not Path(static_path).exists():
+            return None
+
+        try:
+            image_bytes = self.encryption.decrypt_bytes(
+                static_path,
+                password
+            )
+
+            pixmap = QPixmap()
+            pixmap.loadFromData(image_bytes)
+
+            if pixmap.isNull():
+                return None
+
+            return pixmap
+
+        except Exception:
+            return None
+
+    # -------------------------
+    # VIDEO ANIMATED PREVIEW (GIF bytes)
+    # -------------------------
+    def get_video_preview_gif_bytes(
+        self,
+        encrypted_path: str,
+        password: str
+    ):
+        """
+        Returns the decrypted preview GIF as raw bytes, or None
+        if no preview file exists / decryption fails. The caller
+        loads these bytes into a QMovie via a QBuffer.
+        """
+
+        preview_path = encrypted_path + "_preview.enc"
+
+        if not Path(preview_path).exists():
+            return None
+
+        try:
+            return self.encryption.decrypt_bytes(
+                preview_path,
+                password
+            )
+
+        except Exception:
+            return None
+
+    def has_video_preview(self, encrypted_path: str) -> bool:
+
+        return Path(
+            encrypted_path + "_preview.enc"
+        ).exists()
+
+    # -------------------------
+    # VIDEO PLACEHOLDER (no preview available)
     # -------------------------
     def _video_placeholder_pixmap(self) -> QPixmap:
 

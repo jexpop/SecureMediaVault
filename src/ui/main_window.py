@@ -64,6 +64,10 @@ from src.ui.widgets.tag_panel import (
     TagPanel
 )
 
+from src.ui.widgets.video_thumbnail_widget import (
+    VideoThumbnailWidget
+)
+
 from src.ui.change_password_window import (
     ChangePasswordWindow
 )
@@ -246,6 +250,7 @@ class MainWindow(QMainWindow):
         self.preview_window = None
         self.video_player_window = None
         self.change_password_window = None
+        self._previous_selected_item = None
 
         self.load_media()
 
@@ -270,11 +275,30 @@ class MainWindow(QMainWindow):
             .currentItem()
         )
 
+        if self._previous_selected_item is not None and (
+            self._previous_selected_item is not item
+        ):
+
+            previous_widget = (
+                self.gallery.itemWidget(
+                    self._previous_selected_item
+                )
+            )
+
+            if isinstance(
+                previous_widget,
+                VideoThumbnailWidget
+            ):
+
+                previous_widget.set_selected(False)
+
         if not item:
 
             self.tag_panel.set_selected_media(
                 None
             )
+
+            self._previous_selected_item = None
 
             return
 
@@ -285,6 +309,21 @@ class MainWindow(QMainWindow):
         self.tag_panel.set_selected_media(
             media
         )
+
+        current_widget = (
+            self.gallery.itemWidget(
+                item
+            )
+        )
+
+        if isinstance(
+            current_widget,
+            VideoThumbnailWidget
+        ):
+
+            current_widget.set_selected(True)
+
+        self._previous_selected_item = item
 
     # =====================================================
     # FILTER CHANGED (multi-tag, AND)
@@ -367,28 +406,12 @@ class MainWindow(QMainWindow):
             )
         )
 
-        item.setText(
-            self.format_tags(
-                tags
-            )
+        tags_text = self.format_tags(
+            tags
         )
 
         item.setToolTip(
             media.display_filename
-        )
-
-        pixmap = (
-            self.thumbnail_service
-            .get_gallery_pixmap(
-                media=media,
-                password=password
-            )
-        )
-
-        item.setIcon(
-            QIcon(
-                pixmap
-            )
         )
 
         item.setData(
@@ -396,9 +419,79 @@ class MainWindow(QMainWindow):
             media
         )
 
+        category = classify_extension(
+            media.display_media_type
+        )
+
+        has_video_preview = (
+            category == "video"
+            and self.thumbnail_service.has_video_preview(
+                media.encrypted_path
+            )
+        )
+
         self.gallery.addItem(
             item
         )
+
+        if has_video_preview:
+
+            static_pixmap = (
+                self.thumbnail_service
+                .get_video_static_pixmap(
+                    media.encrypted_path,
+                    password
+                )
+            )
+
+            def gif_provider(
+                encrypted_path=media.encrypted_path,
+                password=password
+            ):
+
+                return (
+                    self.thumbnail_service
+                    .get_video_preview_gif_bytes(
+                        encrypted_path,
+                        password
+                    )
+                )
+
+            thumbnail_widget = VideoThumbnailWidget(
+                static_pixmap=static_pixmap,
+                gif_bytes_provider=gif_provider,
+                thumbnail_size=self.gallery.iconSize(),
+                tags_text=tags_text
+            )
+
+            item.setSizeHint(
+                self.gallery.gridSize()
+            )
+
+            self.gallery.setItemWidget(
+                item,
+                thumbnail_widget
+            )
+
+        else:
+
+            item.setText(
+                tags_text
+            )
+
+            pixmap = (
+                self.thumbnail_service
+                .get_gallery_pixmap(
+                    media=media,
+                    password=password
+                )
+            )
+
+            item.setIcon(
+                QIcon(
+                    pixmap
+                )
+            )
 
     # =====================================================
     # LOAD MEDIA
@@ -406,6 +499,7 @@ class MainWindow(QMainWindow):
     def load_media(self):
 
         self.gallery.clear()
+        self._previous_selected_item = None
 
         password = (
             VaultSession
@@ -584,6 +678,7 @@ class MainWindow(QMainWindow):
     ):
 
         self.gallery.clear()
+        self._previous_selected_item = None
 
         password = (
             VaultSession
