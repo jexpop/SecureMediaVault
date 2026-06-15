@@ -21,6 +21,9 @@ class TagPanel(QWidget):
     # Carries a list of selected tag display names.
     filterChanged = Signal(list)
 
+    MODE_GENERAL = "general"
+    MODE_SELECTION = "selection"
+
     def __init__(
         self,
         tag_service,
@@ -40,10 +43,15 @@ class TagPanel(QWidget):
         self.current_media = None
 
         self._filter_checkboxes = {}
+        self._mode = self.MODE_GENERAL
 
         self.build_ui()
 
         self.load_tags()
+
+        self.set_mode(
+            self.MODE_GENERAL
+        )
 
     # =====================================================
     # UI
@@ -95,13 +103,24 @@ class TagPanel(QWidget):
         )
 
         # =================================================
-        # AVAILABLE TAGS
+        # AVAILABLE TAGS (global, general mode - Delete Tag)
         # =================================================
         self.available_tags_combo = (
             QComboBox()
         )
 
         self.available_tags_combo.setMinimumWidth(
+            160
+        )
+
+        # =================================================
+        # AVAILABLE TAGS (selection mode - Add Tag)
+        # =================================================
+        self.selection_available_combo = (
+            QComboBox()
+        )
+
+        self.selection_available_combo.setMinimumWidth(
             160
         )
 
@@ -153,67 +172,63 @@ class TagPanel(QWidget):
         )
 
         # =================================================
-        # LAYOUT
+        # GENERAL MODE GROUP
+        # (filter + global tag management: Available + Delete Tag)
         # =================================================
-        layout.addWidget(
-            QLabel("Filter:")
-        )
+        self.general_widgets = [
+            QLabel("Filter:"),
+            self.filter_button,
+            self.clear_filter_button,
+            QLabel("Available:"),
+            self.available_tags_combo,
+            self.delete_button,
+        ]
 
-        layout.addWidget(
-            self.filter_button
-        )
+        for w in self.general_widgets:
+            layout.addWidget(w)
 
-        layout.addWidget(
-            self.clear_filter_button
-        )
+        # =================================================
+        # SELECTION MODE GROUP
+        # (per-item tag management)
+        # =================================================
+        self.selection_widgets = [
+            QLabel("Image Tags:"),
+            self.image_tags_combo,
+            QLabel("Available:"),
+            self.selection_available_combo,
+            QLabel("New:"),
+            self.new_tag_input,
+            self.add_button,
+            self.remove_button,
+        ]
 
-        layout.addSpacing(
-            15
-        )
-
-        layout.addWidget(
-            QLabel("Image Tags:")
-        )
-
-        layout.addWidget(
-            self.image_tags_combo
-        )
-
-        layout.addSpacing(
-            10
-        )
-
-        layout.addWidget(
-            QLabel("Available:")
-        )
-
-        layout.addWidget(
-            self.available_tags_combo
-        )
-
-        layout.addWidget(
-            QLabel("New:")
-        )
-
-        layout.addWidget(
-            self.new_tag_input
-        )
-
-        layout.addWidget(
-            self.add_button
-        )
-
-        layout.addWidget(
-            self.remove_button
-        )
-
-        layout.addWidget(
-            self.delete_button
-        )
+        for w in self.selection_widgets:
+            layout.addWidget(w)
 
         self.setLayout(
             layout
         )
+
+    # =====================================================
+    # MODE SWITCHING
+    # =====================================================
+    def set_mode(self, mode):
+
+        self._mode = mode
+
+        is_general = (
+            mode == self.MODE_GENERAL
+        )
+
+        for w in self.general_widgets:
+            w.setVisible(is_general)
+
+        for w in self.selection_widgets:
+            w.setVisible(not is_general)
+
+    def get_mode(self):
+
+        return self._mode
 
     # =====================================================
     # LOAD GLOBAL TAGS
@@ -230,12 +245,24 @@ class TagPanel(QWidget):
             .currentText()
         )
 
+        selected_selection_available = (
+            self.selection_available_combo
+            .currentText()
+        )
+
         self.available_tags_combo.blockSignals(
+            True
+        )
+
+        self.selection_available_combo.blockSignals(
             True
         )
 
         self.available_tags_combo.clear()
         self.available_tags_combo.addItem("")
+
+        self.selection_available_combo.clear()
+        self.selection_available_combo.addItem("")
 
         # -------------------------
         # REBUILD FILTER MENU
@@ -254,6 +281,10 @@ class TagPanel(QWidget):
             if not tag.is_system:
 
                 self.available_tags_combo.addItem(
+                    tag.display_name
+                )
+
+                self.selection_available_combo.addItem(
                     tag.display_name
                 )
 
@@ -288,19 +319,23 @@ class TagPanel(QWidget):
 
         self._update_filter_button_text()
 
-        available_index = (
-            self.available_tags_combo.findText(
-                selected_available
-            )
-        )
+        for combo, previous_text in (
+            (self.available_tags_combo, selected_available),
+            (self.selection_available_combo, selected_selection_available),
+        ):
 
-        if available_index >= 0:
-
-            self.available_tags_combo.setCurrentIndex(
-                available_index
+            index = combo.findText(
+                previous_text
             )
+
+            if index >= 0:
+                combo.setCurrentIndex(index)
 
         self.available_tags_combo.blockSignals(
+            False
+        )
+
+        self.selection_available_combo.blockSignals(
             False
         )
 
@@ -431,7 +466,7 @@ class TagPanel(QWidget):
         )
 
         existing_tag = (
-            self.available_tags_combo
+            self.selection_available_combo
             .currentText()
             .strip()
             .lower()

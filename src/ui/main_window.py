@@ -5,10 +5,12 @@ from PySide6.QtWidgets import (
     QPushButton,
     QListWidget,
     QVBoxLayout,
+    QHBoxLayout,
     QWidget,
     QFileDialog,
     QListWidgetItem,
-    QMessageBox
+    QMessageBox,
+    QToolButton
 )
 
 from PySide6.QtGui import (
@@ -152,12 +154,18 @@ class MainWindow(QMainWindow):
         )
 
         # =====================================================
-        # CHANGE PASSWORD BUTTON
+        # CHANGE PASSWORD BUTTON (key icon)
         # =====================================================
         self.change_password_button = (
-            QPushButton(
-                "Change Password"
-            )
+            QToolButton()
+        )
+
+        self.change_password_button.setText(
+            "\U0001F511"  # 🔑
+        )
+
+        self.change_password_button.setToolTip(
+            "Change Password"
         )
 
         self.change_password_button.clicked.connect(
@@ -197,8 +205,8 @@ class MainWindow(QMainWindow):
             self.open_preview
         )
 
-        self.gallery.itemSelectionChanged.connect(
-            self.on_media_selected
+        self.gallery.itemClicked.connect(
+            self.on_gallery_item_clicked
         )
 
         # =====================================================
@@ -221,24 +229,36 @@ class MainWindow(QMainWindow):
         # =====================================================
         # MAIN LAYOUT
         # =====================================================
+        self.top_bar_layout = (
+            QHBoxLayout()
+        )
+
+        self.top_bar_layout.addWidget(
+            self.import_button
+        )
+
+        self.top_bar_layout.addWidget(
+            self.delete_button
+        )
+
+        self.top_bar_layout.addWidget(
+            self.tag_panel
+        )
+
+        self.top_bar_layout.addStretch(
+            1
+        )
+
+        self.top_bar_layout.addWidget(
+            self.change_password_button
+        )
+
         layout = (
             QVBoxLayout()
         )
 
-        layout.addWidget(
-            self.import_button
-        )
-
-        layout.addWidget(
-            self.delete_button
-        )
-
-        layout.addWidget(
-            self.change_password_button
-        )
-
-        layout.addWidget(
-            self.tag_panel
+        layout.addLayout(
+            self.top_bar_layout
         )
 
         layout.addWidget(
@@ -262,6 +282,10 @@ class MainWindow(QMainWindow):
 
         self.load_media()
 
+        self._update_top_bar_for_selection(
+            None
+        )
+
     # =====================================================
     # CHANGE PASSWORD
     # =====================================================
@@ -274,18 +298,49 @@ class MainWindow(QMainWindow):
         self.change_password_window.show()
 
     # =====================================================
-    # MEDIA SELECTED
+    # TOP BAR VISIBILITY BASED ON SELECTION
     # =====================================================
-    def on_media_selected(self):
+    def _update_top_bar_for_selection(self, media):
 
-        item = (
-            self.gallery
-            .currentItem()
+        has_selection = media is not None
+
+        self.import_button.setVisible(
+            not has_selection
         )
 
-        if self._previous_selected_item is not None and (
-            self._previous_selected_item is not item
-        ):
+        self.delete_button.setVisible(
+            has_selection
+        )
+
+        self.tag_panel.set_mode(
+            TagPanel.MODE_SELECTION
+            if has_selection
+            else TagPanel.MODE_GENERAL
+        )
+
+    # =====================================================
+    # GALLERY ITEM CLICKED (single source of truth for
+    # selection toggling)
+    # =====================================================
+    def on_gallery_item_clicked(self, item):
+
+        if item is self._previous_selected_item:
+
+            # Re-click on the already-selected item -> deselect
+            self._deselect_current_item()
+
+        else:
+
+            # New selection (or first selection)
+            self._select_item(item)
+
+    # =====================================================
+    # SELECT ITEM
+    # =====================================================
+    def _select_item(self, item):
+
+        # Un-highlight the previous video thumbnail (if any)
+        if self._previous_selected_item is not None:
 
             previous_widget = (
                 self.gallery.itemWidget(
@@ -300,21 +355,17 @@ class MainWindow(QMainWindow):
 
                 previous_widget.set_selected(False)
 
-        if not item:
-
-            self.tag_panel.set_selected_media(
-                None
-            )
-
-            self._previous_selected_item = None
-
-            return
+        self._previous_selected_item = item
 
         media = item.data(
             Qt.UserRole
         )
 
         self.tag_panel.set_selected_media(
+            media
+        )
+
+        self._update_top_bar_for_selection(
             media
         )
 
@@ -331,7 +382,42 @@ class MainWindow(QMainWindow):
 
             current_widget.set_selected(True)
 
-        self._previous_selected_item = item
+    # =====================================================
+    # DESELECT CURRENT ITEM
+    # =====================================================
+    def _deselect_current_item(self):
+
+        item = self._previous_selected_item
+
+        if item is not None:
+
+            current_widget = (
+                self.gallery.itemWidget(
+                    item
+                )
+            )
+
+            if isinstance(
+                current_widget,
+                VideoThumbnailWidget
+            ):
+
+                current_widget.set_selected(False)
+
+        self._previous_selected_item = None
+
+        self.gallery.blockSignals(True)
+        self.gallery.clearSelection()
+        self.gallery.setCurrentItem(None)
+        self.gallery.blockSignals(False)
+
+        self.tag_panel.set_selected_media(
+            None
+        )
+
+        self._update_top_bar_for_selection(
+            None
+        )
 
     # =====================================================
     # FILTER CHANGED (multi-tag, AND)

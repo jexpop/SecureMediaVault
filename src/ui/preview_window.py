@@ -7,7 +7,13 @@ from src.core.services.thumbnail_service import ThumbnailService
 
 class PreviewWindow(QWidget):
 
-    def __init__(self, media_list, current_index, password):
+    def __init__(
+        self,
+        media_list,
+        current_index,
+        password,
+        on_close_callback=None
+    ):
 
         super().__init__()
 
@@ -20,6 +26,7 @@ class PreviewWindow(QWidget):
         self.media_list = media_list
         self.index = current_index
         self.password = password
+        self.on_close_callback = on_close_callback
 
         # -------------------------
         # SERVICE
@@ -179,3 +186,13 @@ class PreviewWindow(QWidget):
             self._scale = 1.0
             self._offset = QPoint(0, 0)
             self.update()
+
+    # -------------------------
+    # CLOSE
+    # -------------------------
+    def closeEvent(self, event):
+
+        event.accept()
+
+        if self.on_close_callback:
+            self.on_close_callback()

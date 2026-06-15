@@ -45,15 +45,19 @@ class VideoPlayerWindow(QWidget):
     Any leftover temp files from a crashed session are cleaned
     up on app startup (see TempMediaService.cleanup_stale, called
     from app.py).
+    on_close_callback, if provided, is called every time the
+    window is closed (e.g. so MainWindow can re-enable the
+    Change Password button while no media viewer is open).
     """
 
-    def __init__(self):
+    def __init__(self, on_close_callback=None):
 
         super().__init__()
 
         self.resize(900, 600)
 
         self.temp_media_service = TempMediaService()
+        self.on_close_callback = on_close_callback
 
         self._current_temp_path = None
         self._loading = False
@@ -283,7 +287,7 @@ class VideoPlayerWindow(QWidget):
         elif event.key() == Qt.Key_Space:
             self.toggle_play()
 
-# -------------------------
+    # -------------------------
     # CLOSE: STOP + SECURE DELETE + HIDE
     # -------------------------
     def closeEvent(self, event):
@@ -301,3 +305,6 @@ class VideoPlayerWindow(QWidget):
 
         if path:
             self._delete_temp_with_retry(path)
+
+        if self.on_close_callback:
+            self.on_close_callback()
