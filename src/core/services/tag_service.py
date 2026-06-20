@@ -290,10 +290,15 @@ class TagService:
         if not media:
             return []
 
-        tags = media.tags
+        tags = list(media.tags)
 
         for tag in tags:
             self._attach_display_name(tag)
+
+        # system tags first, then alphabetical
+        tags.sort(
+            key=lambda t: (not t.is_system, t.display_name)
+        )
 
         return tags
     
