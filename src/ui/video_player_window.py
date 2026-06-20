@@ -307,4 +307,4 @@ class VideoPlayerWindow(QWidget):
             self._delete_temp_with_retry(path)
 
         if self.on_close_callback:
-            self.on_close_callback()
+            self.on_close_callback(self)

@@ -195,4 +195,4 @@ class PreviewWindow(QWidget):
         event.accept()
 
         if self.on_close_callback:
-            self.on_close_callback()
+            self.on_close_callback(self)

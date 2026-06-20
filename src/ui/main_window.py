@@ -279,6 +279,8 @@ class MainWindow(QMainWindow):
         self.video_player_window = None
         self.change_password_window = None
         self._previous_selected_item = None
+        self._video_player_open = False
+        self._preview_open = False
 
         self.load_media()
 
@@ -874,7 +876,10 @@ class MainWindow(QMainWindow):
             if self.video_player_window is None:
 
                 self.video_player_window = (
-                    VideoPlayerWindow()
+                    VideoPlayerWindow(
+                        on_close_callback=
+                        self._on_media_viewer_closed
+                    )
                 )
 
             self.video_player_window.load_media(
@@ -885,6 +890,12 @@ class MainWindow(QMainWindow):
             self.video_player_window.show()
             self.video_player_window.raise_()
             self.video_player_window.activateWindow()
+
+            self._video_player_open = True
+
+            self.change_password_button.setEnabled(
+                False
+            )
 
             return
 
@@ -916,8 +927,40 @@ class MainWindow(QMainWindow):
                 current_index,
 
                 password=
-                password
+                password,
+
+                on_close_callback=
+                self._on_media_viewer_closed
             )
         )
 
         self.preview_window.show()
+
+        self._preview_open = True
+
+        self.change_password_button.setEnabled(
+            False
+        )
+
+    # =====================================================
+    # MEDIA VIEWER CLOSED (re-enable Change Password)
+    # =====================================================
+    def _on_media_viewer_closed(self, sender=None):
+        """
+        Called from VideoPlayerWindow/PreviewWindow's closeEvent,
+        passing the window instance itself as `sender`. This lets
+        us track open/closed state explicitly instead of relying
+        on isVisible() (unreliable right at close time).
+        """
+
+        if sender is self.video_player_window:
+            self._video_player_open = False
+
+        elif sender is self.preview_window:
+            self._preview_open = False
+
+        if not self._video_player_open and not self._preview_open:
+
+            self.change_password_button.setEnabled(
+                True
+            )
