@@ -6,6 +6,12 @@ generation existed).
 
 Usage:
     python\\python.exe -m tools.generate_video_previews
+    python\\python.exe -m tools.generate_video_previews --force
+
+--force regenerates previews even for videos that already have
+one (e.g. after improving the preview logic, such as skipping a
+black intro). Existing "_static.enc"/"_preview.enc" files are
+deleted before regenerating.
 
 Run from the project root (same place you run `python -m src.app`).
 Does not open any UI window.
@@ -13,6 +19,7 @@ Does not open any UI window.
 
 import sys
 import getpass
+import argparse
 from pathlib import Path
 
 from PySide6.QtWidgets import QApplication
@@ -32,6 +39,25 @@ from src.core.services.video_preview_service import VideoPreviewService
 
 
 def main():
+
+    parser = argparse.ArgumentParser(
+        description=(
+            "Generate (or regenerate) encrypted video previews "
+            "for videos already in the vault."
+        )
+    )
+
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help=(
+            "Regenerate previews even for videos that already "
+            "have one (deletes the existing _static.enc / "
+            "_preview.enc first)."
+        )
+    )
+
+    args = parser.parse_args()
 
     app = QApplication(sys.argv)
 
@@ -78,6 +104,7 @@ def main():
 
     total_videos = 0
     generated = 0
+    regenerated = 0
     skipped_existing = 0
     failed = []
 
@@ -106,13 +133,29 @@ def main():
 
         total_videos += 1
 
-        preview_path = media.encrypted_path + "_preview.enc"
+        static_path = Path(media.encrypted_path + "_static.enc")
+        preview_path = Path(media.encrypted_path + "_preview.enc")
 
-        if Path(preview_path).exists():
+        already_has_preview = preview_path.exists()
+
+        if already_has_preview and not args.force:
             skipped_existing += 1
             continue
 
-        print(f"[GENERATING] {filename} ...", end=" ", flush=True)
+        if already_has_preview and args.force:
+
+            for path in (static_path, preview_path):
+
+                if path.exists():
+                    path.unlink()
+
+        label = (
+            "[REGENERATING]"
+            if already_has_preview
+            else "[GENERATING]"
+        )
+
+        print(f"{label} {filename} ...", end=" ", flush=True)
 
         success = preview_service.generate_previews(
             encrypted_video_path=media.encrypted_path,
@@ -121,8 +164,14 @@ def main():
         )
 
         if success:
+
             print("OK")
-            generated += 1
+
+            if already_has_preview:
+                regenerated += 1
+            else:
+                generated += 1
+
         else:
             print("FAILED")
             failed.append(filename)
@@ -137,6 +186,7 @@ def main():
     print(f"Total videos found:      {total_videos}")
     print(f"Already had preview:     {skipped_existing}")
     print(f"Previews generated:      {generated}")
+    print(f"Previews regenerated:    {regenerated}")
     print(f"Failed:                  {len(failed)}")
 
     if failed:

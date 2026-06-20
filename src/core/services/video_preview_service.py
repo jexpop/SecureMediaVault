@@ -1,7 +1,7 @@
 import io
 from pathlib import Path
 
-from PySide6.QtCore import QEventLoop, QTimer, QUrl
+from PySide6.QtCore import QEventLoop, QTimer, QUrl, Qt
 from PySide6.QtGui import QImage
 from PySide6.QtMultimedia import QMediaPlayer, QVideoSink
 
@@ -19,6 +19,11 @@ class VideoPreviewService:
         encrypted), made of several frames sampled from the start
         of the video.
 
+    Before sampling, probes forward past any black intro/fade-in
+    so the preview doesn't end up being a black frame (common with
+    videos exported from editing software). See
+    BLACK_LUMINANCE_THRESHOLD / _find_non_black_start.
+
     Frames are captured via QMediaPlayer + QVideoSink (no external
     binaries required). The GIF is assembled in memory with
     Pillow.
@@ -31,8 +36,23 @@ class VideoPreviewService:
 
     PREVIEW_WIDTH = 240
     FRAME_COUNT = 8
-    CAPTURE_WINDOW_MS = 3000  # first 3 seconds
+    CAPTURE_WINDOW_MS = 3000  # first 3 seconds (once past black frames)
     GIF_FRAME_DURATION_MS = 125  # ~8 fps
+
+    # -------------------------
+    # BLACK-FRAME DETECTION
+    # -------------------------
+    # Mean luminance (0-255) below this is considered "too dark"
+    # (pure black intros as well as heavily shadowed/dim frames).
+    BLACK_LUMINANCE_THRESHOLD = 40
+
+    # How far into the video we're willing to probe to find the
+    # first non-black frame, before giving up and just using
+    # whatever we found (even if it's black).
+    BLACK_SKIP_MAX_PROBE_MS = 15000  # 15 seconds
+
+    # Step size while probing forward past a black intro.
+    BLACK_SKIP_PROBE_STEP_MS = 500
 
     def __init__(self):
 
@@ -107,8 +127,9 @@ class VideoPreviewService:
     def _capture_frames(self, video_path: str):
         """
         Plays the video headlessly and captures FRAME_COUNT frames
-        as QImage, sampled evenly across CAPTURE_WINDOW_MS
-        (clamped to the video's actual duration).
+        as QImage, sampled evenly across CAPTURE_WINDOW_MS,
+        starting from the first non-black frame found (so a black
+        intro/fade-in doesn't end up as the preview).
 
         Uses a local QEventLoop to turn QMediaPlayer's async
         signal-based API into a simple blocking sequence, since
@@ -133,18 +154,26 @@ class VideoPreviewService:
 
         duration = player.duration()
 
+        start_position = self._find_non_black_start(
+            player,
+            sink,
+            duration
+        )
+
         window = min(
             self.CAPTURE_WINDOW_MS,
-            max(duration - 1, 0)
+            max(duration - start_position - 1, 0)
         )
 
         if window <= 0:
-            # Very short or zero-duration video: just grab one
-            # frame at position 0.
-            positions = [0]
+            # Very short video, or nothing left after skipping the
+            # black intro: just grab one frame at start_position.
+            positions = [start_position]
         else:
             positions = [
-                int(window * i / (self.FRAME_COUNT - 1))
+                start_position + int(
+                    window * i / (self.FRAME_COUNT - 1)
+                )
                 for i in range(self.FRAME_COUNT)
             ]
 
@@ -165,6 +194,93 @@ class VideoPreviewService:
         player.setSource(QUrl())
 
         return frames
+
+    # -------------------------
+    # SKIP BLACK INTRO / FADE-IN
+    # -------------------------
+    def _find_non_black_start(
+        self,
+        player,
+        sink,
+        duration_ms: int
+    ) -> int:
+        """
+        Probes forward from position 0 in steps of
+        BLACK_SKIP_PROBE_STEP_MS, looking for the first frame
+        whose mean luminance is above BLACK_LUMINANCE_THRESHOLD.
+
+        Gives up after BLACK_SKIP_MAX_PROBE_MS (or the video's own
+        duration, whichever is smaller) and falls back to the
+        brightest frame seen during the probe - so a video that's
+        black throughout (or has an unusually long fade-in) still
+        gets *some* preview instead of failing outright.
+        """
+
+        max_probe = min(
+            self.BLACK_SKIP_MAX_PROBE_MS,
+            max(duration_ms - 1, 0)
+        )
+
+        position = 0
+
+        best_position = 0
+        best_luminance = -1.0
+
+        while position <= max_probe:
+
+            image = self._capture_frame_at(
+                player,
+                sink,
+                position
+            )
+
+            if image is not None and not image.isNull():
+
+                luminance = self._mean_luminance(image)
+
+                if luminance > best_luminance:
+                    best_luminance = luminance
+                    best_position = position
+
+                if luminance >= self.BLACK_LUMINANCE_THRESHOLD:
+                    return position
+
+            position += self.BLACK_SKIP_PROBE_STEP_MS
+
+        # Nothing bright enough found - use the brightest one we
+        # did see (better than an all-black frame chosen blindly).
+        return best_position
+
+    def _mean_luminance(self, qimage) -> float:
+        """
+        Returns the average luminance (0-255) of a downsampled
+        version of the frame. Downsampling first keeps this cheap
+        even for 4K source video, since we only need a rough
+        "is this black" estimate, not a precise measurement.
+        """
+
+        sample = qimage.scaled(
+            32,
+            32,
+            Qt.IgnoreAspectRatio,
+            Qt.FastTransformation
+        )
+
+        sample = sample.convertToFormat(
+            QImage.Format_Grayscale8
+        )
+
+        width = sample.width()
+        height = sample.height()
+
+        if width <= 0 or height <= 0:
+            return 0.0
+
+        ptr = sample.constBits()
+
+        buffer = bytes(ptr)[:width * height]
+
+        return sum(buffer) / len(buffer)
 
     def _wait_for_duration(self, player, timeout_ms=5000) -> bool:
 
