@@ -10,7 +10,8 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QListWidgetItem,
     QMessageBox,
-    QToolButton
+    QToolButton,
+    QLabel
 )
 
 from PySide6.QtGui import (
@@ -269,6 +270,41 @@ class MainWindow(QMainWindow):
             self.gallery
         )
 
+        # =====================================================
+        # PAGINATION BAR
+        # =====================================================
+        self.pagination_bar = QHBoxLayout()
+
+        self.prev_page_button = QPushButton("← Anterior")
+        self.prev_page_button.clicked.connect(
+            self._go_to_prev_page
+        )
+
+        self.next_page_button = QPushButton("Siguiente →")
+        self.next_page_button.clicked.connect(
+            self._go_to_next_page
+        )
+
+        self.page_info_label = QLabel("")
+        self.page_info_label.setAlignment(Qt.AlignCenter)
+
+        self._page_number_buttons = []
+
+        self.pagination_bar.addWidget(self.prev_page_button)
+        self.pagination_bar.addStretch(1)
+        self.pagination_bar.addWidget(self.page_info_label)
+        self.pagination_bar.addStretch(1)
+        self.pagination_bar.addWidget(self.next_page_button)
+
+        self._pagination_widget = QWidget()
+        self._pagination_widget.setLayout(
+            self.pagination_bar
+        )
+
+        layout.addWidget(
+            self._pagination_widget
+        )
+
         container = QWidget()
 
         container.setLayout(
@@ -285,6 +321,13 @@ class MainWindow(QMainWindow):
         self._previous_selected_item = None
         self._video_player_open = False
         self._preview_open = False
+
+        # =====================================================
+        # PAGINATION STATE
+        # =====================================================
+        self.PAGE_SIZE = 12
+        self._current_page = 0       # 0-indexed internally
+        self._all_media_items = []   # full list, all pages
 
         self.load_media()
 
@@ -636,24 +679,20 @@ class MainWindow(QMainWindow):
     # =====================================================
     def load_media(self):
 
-        self.gallery.clear()
-        self._previous_selected_item = None
-
         password = (
             VaultSession
             .get_password()
         )
 
-        media_items = (
+        all_media = (
             self.media_service
             .get_all_media()
         )
 
-        self.current_media_items = (
-            media_items
-        )
+        # Filter out integrity failures
+        valid_media = []
 
-        for media in media_items:
+        for media in all_media:
 
             status = (
                 self.integrity_service
@@ -663,13 +702,14 @@ class MainWindow(QMainWindow):
                 )
             )
 
-            if status != "ok":
-                continue
+            if status == "ok":
+                valid_media.append(media)
 
-            self._populate_gallery_item(
-                media,
-                password
-            )
+        self._all_media_items = valid_media
+        self.current_media_items = valid_media
+        self._current_page = 0
+
+        self._render_current_page()
 
     # =====================================================
     # REFRESH VIEW
@@ -856,14 +896,6 @@ class MainWindow(QMainWindow):
         tag_names
     ):
 
-        self.gallery.clear()
-        self._previous_selected_item = None
-
-        password = (
-            VaultSession
-            .get_password()
-        )
-
         media_items = (
             self.tag_service
             .get_media_by_tags(
@@ -878,16 +910,174 @@ class MainWindow(QMainWindow):
             )
         )
 
-        self.current_media_items = (
-            media_items
-        )
+        self._all_media_items = media_items
+        self.current_media_items = media_items
+        self._current_page = 0
 
-        for media in media_items:
+        self._render_current_page()
+
+    # =====================================================
+    # PAGINATION
+    # =====================================================
+    def _total_pages(self):
+
+        total = len(self._all_media_items)
+
+        if total == 0:
+            return 1
+
+        return (total + self.PAGE_SIZE - 1) // self.PAGE_SIZE
+
+    def _render_current_page(self):
+        """
+        Clears the gallery and populates it with only the items
+        for the current page, then rebuilds the pagination bar.
+        """
+
+        self.gallery.clear()
+        self._previous_selected_item = None
+        self._update_top_bar_for_selection(None)
+
+        password = VaultSession.get_password()
+
+        total_pages = self._total_pages()
+        start = self._current_page * self.PAGE_SIZE
+        end = start + self.PAGE_SIZE
+
+        page_items = self._all_media_items[start:end]
+
+        for media in page_items:
 
             self._populate_gallery_item(
                 media,
                 password
             )
+
+        self._rebuild_pagination_bar(total_pages)
+
+    def _rebuild_pagination_bar(self, total_pages):
+        """
+        Rebuilds the pagination bar with Previous / page numbers
+        / Next. The current page button is disabled (already
+        there) so the user can see which page they're on.
+        """
+
+        # Remove old page number buttons
+        for btn in self._page_number_buttons:
+            self.pagination_bar.removeWidget(btn)
+            btn.deleteLater()
+
+        self._page_number_buttons = []
+
+        current = self._current_page
+        total = total_pages
+
+        self.prev_page_button.setEnabled(current > 0)
+        self.next_page_button.setEnabled(current < total - 1)
+
+        # Build page number buttons
+        # Always show: first, last, current ±2, with "..." gaps
+        def pages_to_show(current, total):
+
+            if total <= 7:
+                return list(range(total))
+
+            pages = set()
+            pages.add(0)
+            pages.add(total - 1)
+
+            for p in range(
+                max(0, current - 2),
+                min(total, current + 3)
+            ):
+                pages.add(p)
+
+            return sorted(pages)
+
+        shown = pages_to_show(current, total)
+
+        # Insert page buttons between Prev and Next
+        # (Prev is index 0, stretch 1, info label, stretch 2, Next)
+        # We insert before the first stretch (index 1)
+        insert_index = 1
+
+        prev_page = None
+
+        for page in shown:
+
+            if prev_page is not None and page - prev_page > 1:
+
+                # Gap — add "..." label
+                dots = QLabel("…")
+                dots.setAlignment(Qt.AlignCenter)
+                self.pagination_bar.insertWidget(
+                    insert_index,
+                    dots
+                )
+                self._page_number_buttons.append(dots)
+                insert_index += 1
+
+            btn = QPushButton(str(page + 1))
+            btn.setFixedWidth(36)
+
+            if page == current:
+                btn.setEnabled(False)
+            else:
+                btn.clicked.connect(
+                    lambda checked, p=page: self._go_to_page(p)
+                )
+
+            self.pagination_bar.insertWidget(
+                insert_index,
+                btn
+            )
+
+            self._page_number_buttons.append(btn)
+            insert_index += 1
+            prev_page = page
+
+        # Update info label
+        total_items = len(self._all_media_items)
+        start = self._current_page * self.PAGE_SIZE + 1
+        end = min(
+            start + self.PAGE_SIZE - 1,
+            total_items
+        )
+
+        self.page_info_label.setText(
+            f"{start}-{end} / {total_items}"
+        )
+
+        # Hide the whole bar if there's only one page
+        self._pagination_widget.setVisible(
+            total_pages > 1
+        )
+
+    def _go_to_page(self, page):
+
+        total = self._total_pages()
+
+        self._current_page = max(0, min(page, total - 1))
+        self._render_current_page()
+
+    def _go_to_prev_page(self):
+
+        self._go_to_page(self._current_page - 1)
+
+    def _go_to_next_page(self):
+
+        self._go_to_page(self._current_page + 1)
+
+    def keyPressEvent(self, event):
+
+        if event.key() == Qt.Key_PageUp:
+            self._go_to_prev_page()
+
+        elif event.key() == Qt.Key_PageDown:
+            self._go_to_next_page()
+
+        else:
+            super().keyPressEvent(event)
 
     # =====================================================
     # PREVIEW / PLAYBACK
