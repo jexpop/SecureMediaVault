@@ -21,6 +21,12 @@ class TagPanel(QWidget):
     # Carries a list of selected tag display names.
     filterChanged = Signal(list)
 
+    # Emitted when tags of a specific media item change
+    # (add/remove). Carries the media_id of the affected item.
+    # MainWindow uses this to update only that gallery item's
+    # text instead of reloading the whole gallery.
+    tagChanged = Signal(int)
+
     MODE_GENERAL = "general"
     MODE_SELECTION = "selection"
 
@@ -520,7 +526,9 @@ class TagPanel(QWidget):
             self.current_media
         )
 
-        self.refresh_callback()
+        self.tagChanged.emit(
+            self.current_media.id
+        )
 
     # =====================================================
     # REMOVE TAG
@@ -559,7 +567,9 @@ class TagPanel(QWidget):
             self.current_media
         )
 
-        self.refresh_callback()
+        self.tagChanged.emit(
+            self.current_media.id
+        )
 
     # =====================================================
     # DELETE TAG

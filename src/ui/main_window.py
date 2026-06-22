@@ -226,6 +226,10 @@ class MainWindow(QMainWindow):
             self.on_filter_changed
         )
 
+        self.tag_panel.tagChanged.connect(
+            self._update_gallery_item_tags
+        )
+
         # =====================================================
         # MAIN LAYOUT
         # =====================================================
@@ -588,6 +592,44 @@ class MainWindow(QMainWindow):
                     pixmap
                 )
             )
+
+    # =====================================================
+    # UPDATE TAGS TEXT FOR A SINGLE GALLERY ITEM
+    # (fast path for add_tag / remove_tag — avoids reloading
+    # the whole gallery just to update one item's tag list)
+    # =====================================================
+    def _update_gallery_item_tags(self, media_id: int):
+
+        for i in range(self.gallery.count()):
+
+            item = self.gallery.item(i)
+
+            media = item.data(Qt.UserRole)
+
+            if media is None or media.id != media_id:
+                continue
+
+            tags = (
+                self.tag_service
+                .get_tags_for_media(
+                    media_id
+                )
+            )
+
+            new_text = self.format_tags(tags)
+
+            widget = self.gallery.itemWidget(item)
+
+            if widget is not None and hasattr(widget, "tags_label"):
+
+                # VideoThumbnailWidget: update its embedded label
+                widget.tags_label.setText(new_text)
+
+            else:
+
+                item.setText(new_text)
+
+            break
 
     # =====================================================
     # LOAD MEDIA
