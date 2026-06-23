@@ -15,13 +15,64 @@ from PySide6.QtWidgets import (
 )
 
 from PySide6.QtGui import (
-    QIcon
+    QIcon,
+    QColor,
+    QBrush
 )
 
 from PySide6.QtCore import (
     QSize,
     Qt
 )
+
+
+class GalleryWidget(QListWidget):
+    """
+    QListWidget subclass that handles mouse events directly to
+    support accumulative multi-selection (each click
+    toggles that item, without clearing the others).
+
+    We bypass Qt's built-in selection machinery entirely by
+    using MultiSelection mode but intercepting mousePressEvent
+    before Qt processes it, so we can implement our own toggle
+    logic and pass the event to the parent only for scrolling/
+    focus handling (not for selection state changes).
+    """
+
+    def __init__(self, on_click, on_double_click, parent=None):
+
+        super().__init__(parent)
+
+        self._on_click = on_click
+        self._on_double_click = on_double_click
+
+        self.setSelectionMode(QListWidget.NoSelection)
+
+    def mousePressEvent(self, event):
+
+        if event.button() == Qt.LeftButton:
+
+            item = self.itemAt(event.pos())
+
+            if item is not None:
+                self._on_click(item)
+                # Don't call super() here — Qt would clear our
+                # manual background highlight in NoSelection mode.
+                return
+
+        super().mousePressEvent(event)
+
+    def mouseDoubleClickEvent(self, event):
+
+        if event.button() == Qt.LeftButton:
+
+            item = self.itemAt(event.pos())
+
+            if item is not None:
+                self._on_double_click(item)
+                return
+
+        super().mouseDoubleClickEvent(event)
 
 from src.core.services.import_service import (
     ImportService
@@ -142,12 +193,19 @@ class MainWindow(QMainWindow):
         )
 
         # =====================================================
-        # DELETE BUTTON
+        # DELETE BUTTON (red, single-selection only)
         # =====================================================
         self.delete_button = (
             QPushButton(
                 "Delete Selected"
             )
+        )
+
+        self.delete_button.setStyleSheet(
+            "QPushButton { background-color: #c0392b; color: white; "
+            "border-radius: 4px; padding: 4px 8px; } "
+            "QPushButton:hover { background-color: #e74c3c; } "
+            "QPushButton:disabled { background-color: #888; }"
         )
 
         self.delete_button.clicked.connect(
@@ -176,7 +234,10 @@ class MainWindow(QMainWindow):
         # =====================================================
         # GALLERY
         # =====================================================
-        self.gallery = QListWidget()
+        self.gallery = GalleryWidget(
+            on_click=self.on_gallery_item_clicked,
+            on_double_click=self.open_preview
+        )
 
         self.gallery.setViewMode(
             QListWidget.IconMode
@@ -200,14 +261,6 @@ class MainWindow(QMainWindow):
 
         self.gallery.setWordWrap(
             True
-        )
-
-        self.gallery.itemDoubleClicked.connect(
-            self.open_preview
-        )
-
-        self.gallery.itemClicked.connect(
-            self.on_gallery_item_clicked
         )
 
         # =====================================================
@@ -319,6 +372,7 @@ class MainWindow(QMainWindow):
         self.video_player_window = None
         self.change_password_window = None
         self._previous_selected_item = None
+        self._selected_items = {}   # {id(item): item} — QListWidgetItem not hashable in PySide6
         self._video_player_open = False
         self._preview_open = False
 
@@ -347,18 +401,25 @@ class MainWindow(QMainWindow):
         self.change_password_window.show()
 
     # =====================================================
-    # TOP BAR VISIBILITY BASED ON SELECTION
+    # TOP BAR VISIBILITY BASED ON SELECTION COUNT
     # =====================================================
-    def _update_top_bar_for_selection(self, media):
+    def _update_top_bar_for_selection(self, media=None):
+        """
+        media param kept for compatibility with _render_current_page
+        which calls _update_top_bar_for_selection(None).
+        Actual state is driven by _selected_items.
+        """
 
-        has_selection = media is not None
+        count = len(self._selected_items)
+        has_selection = count > 0
 
         self.import_button.setVisible(
             not has_selection
         )
 
+        # Delete only visible (and red) when exactly 1 selected
         self.delete_button.setVisible(
-            has_selection
+            count == 1
         )
 
         self.tag_panel.set_mode(
@@ -367,106 +428,102 @@ class MainWindow(QMainWindow):
             else TagPanel.MODE_GENERAL
         )
 
-    # =====================================================
-    # GALLERY ITEM CLICKED (single source of truth for
-    # selection toggling)
-    # =====================================================
-    def on_gallery_item_clicked(self, item):
+        if has_selection:
 
-        if item is self._previous_selected_item:
+            media_list = [
+                item.data(Qt.UserRole)
+                for item in self._selected_items.values()
+                if item.data(Qt.UserRole) is not None
+            ]
 
-            # Re-click on the already-selected item -> deselect
-            self._deselect_current_item()
+            self.tag_panel.set_selected_media_list(
+                media_list
+            )
 
         else:
 
-            # New selection (or first selection)
-            self._select_item(item)
+            self.tag_panel.set_selected_media_list([])
 
     # =====================================================
-    # SELECT ITEM
+    # HIGHLIGHT ITEM (visual selection indicator)
     # =====================================================
-    def _select_item(self, item):
+    def _set_item_highlight(self, item, selected: bool):
+        """
+        Marks an item as selected/deselected visually.
+        For VideoThumbnailWidget items, delegates to the widget.
+        For plain icon items, sets a background highlight color.
+        Uses manual coloring because gallery is in NoSelection
+        mode (so Qt doesn't override our multi-select logic).
+        """
 
-        # Un-highlight the previous video thumbnail (if any)
-        if self._previous_selected_item is not None:
+        widget = self.gallery.itemWidget(item)
 
-            previous_widget = (
-                self.gallery.itemWidget(
-                    self._previous_selected_item
+        if isinstance(widget, VideoThumbnailWidget):
+            widget.set_selected(selected)
+
+        if selected:
+            item.setBackground(
+                QBrush(QColor("#2a6496"))
+            )
+            item.setForeground(
+                QBrush(QColor("#ffffff"))
+            )
+        else:
+            item.setBackground(
+                QBrush(Qt.transparent)
+            )
+            item.setForeground(
+                QBrush(
+                    self.gallery.palette().color(
+                        self.gallery.foregroundRole()
+                    )
                 )
             )
 
-            if isinstance(
-                previous_widget,
-                VideoThumbnailWidget
-            ):
-
-                previous_widget.set_selected(False)
-
-        self._previous_selected_item = item
-
-        media = item.data(
-            Qt.UserRole
-        )
-
-        self.tag_panel.set_selected_media(
-            media
-        )
-
-        self._update_top_bar_for_selection(
-            media
-        )
-
-        current_widget = (
-            self.gallery.itemWidget(
-                item
-            )
-        )
-
-        if isinstance(
-            current_widget,
-            VideoThumbnailWidget
-        ):
-
-            current_widget.set_selected(True)
-
     # =====================================================
-    # DESELECT CURRENT ITEM
+    # GALLERY ITEM CLICKED (accumulative toggle selection)
     # =====================================================
-    def _deselect_current_item(self):
+    def on_gallery_item_clicked(self, item):
+        """
+        Each click toggles that item in/out of the selection
+        without clearing the rest (accumulative multi-select).
+        """
 
-        item = self._previous_selected_item
+        key = id(item)
 
-        if item is not None:
+        if key in self._selected_items:
 
-            current_widget = (
-                self.gallery.itemWidget(
-                    item
+            # Toggle off
+            del self._selected_items[key]
+            self._set_item_highlight(item, False)
+
+            if self._previous_selected_item is item:
+                self._previous_selected_item = (
+                    next(iter(self._selected_items.values()), None)
                 )
-            )
 
-            if isinstance(
-                current_widget,
-                VideoThumbnailWidget
-            ):
+        else:
 
-                current_widget.set_selected(False)
+            # Toggle on
+            self._selected_items[key] = item
+            self._set_item_highlight(item, True)
+            self._previous_selected_item = item
 
+        self._update_top_bar_for_selection()
+
+    # =====================================================
+    # CLEAR ALL SELECTIONS
+    # =====================================================
+    def _clear_all_selections(self):
+
+        for item in list(self._selected_items.values()):
+            self._set_item_highlight(item, False)
+
+        self._selected_items.clear()
         self._previous_selected_item = None
 
-        self.gallery.blockSignals(True)
-        self.gallery.clearSelection()
-        self.gallery.setCurrentItem(None)
-        self.gallery.blockSignals(False)
-
-        self.tag_panel.set_selected_media(
-            None
-        )
-
-        self._update_top_bar_for_selection(
-            None
-        )
+        self.tag_panel.set_selected_media_list([])
+        self._update_top_bar_for_selection()
 
     # =====================================================
     # FILTER CHANGED (multi-tag, AND)
@@ -641,7 +698,9 @@ class MainWindow(QMainWindow):
     # (fast path for add_tag / remove_tag — avoids reloading
     # the whole gallery just to update one item's tag list)
     # =====================================================
-    def _update_gallery_item_tags(self, media_id: int):
+    def _update_gallery_item_tags(self, media_ids: list):
+
+        ids_set = set(media_ids)
 
         for i in range(self.gallery.count()):
 
@@ -649,13 +708,13 @@ class MainWindow(QMainWindow):
 
             media = item.data(Qt.UserRole)
 
-            if media is None or media.id != media_id:
+            if media is None or media.id not in ids_set:
                 continue
 
             tags = (
                 self.tag_service
                 .get_tags_for_media(
-                    media_id
+                    media.id
                 )
             )
 
@@ -664,15 +723,9 @@ class MainWindow(QMainWindow):
             widget = self.gallery.itemWidget(item)
 
             if widget is not None and hasattr(widget, "tags_label"):
-
-                # VideoThumbnailWidget: update its embedded label
                 widget.tags_label.setText(new_text)
-
             else:
-
                 item.setText(new_text)
-
-            break
 
     # =====================================================
     # LOAD MEDIA
@@ -822,20 +875,10 @@ class MainWindow(QMainWindow):
     # =====================================================
     def delete_selected_media(self):
 
-        item = (
-            self.gallery
-            .currentItem()
-        )
-
-        if not item:
-
-            QMessageBox.warning(
-                self,
-                "No Selection",
-                "Please select an image to delete"
-            )
-
+        if len(self._selected_items) != 1:
             return
+
+        item = next(iter(self._selected_items.values()))
 
         media = item.data(
             Qt.UserRole
@@ -936,6 +979,7 @@ class MainWindow(QMainWindow):
 
         self.gallery.clear()
         self._previous_selected_item = None
+        self._selected_items.clear()
         self._update_top_bar_for_selection(None)
 
         password = VaultSession.get_password()

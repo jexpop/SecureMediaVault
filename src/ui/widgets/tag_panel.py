@@ -22,10 +22,8 @@ class TagPanel(QWidget):
     filterChanged = Signal(list)
 
     # Emitted when tags of a specific media item change
-    # (add/remove). Carries the media_id of the affected item.
-    # MainWindow uses this to update only that gallery item's
-    # text instead of reloading the whole gallery.
-    tagChanged = Signal(int)
+    # (add/remove). Carries the list of media_ids affected.
+    tagChanged = Signal(list)
 
     MODE_GENERAL = "general"
     MODE_SELECTION = "selection"
@@ -46,7 +44,7 @@ class TagPanel(QWidget):
             refresh_callback
         )
 
-        self.current_media = None
+        self.current_media_list = []
 
         self._filter_checkboxes = {}
         self._mode = self.MODE_GENERAL
@@ -409,59 +407,101 @@ class TagPanel(QWidget):
             self.filterChanged.emit([])
 
     # =====================================================
-    # SET SELECTED MEDIA
+    # SET SELECTED MEDIA (list, supports multi-selection)
     # =====================================================
-    def set_selected_media(
+    def set_selected_media_list(
         self,
-        media
+        media_list
     ):
+        """
+        Updates the Image Tags combo to reflect the tags of all
+        selected items. Tags present in ALL selected items appear
+        normally. Tags present in only SOME of them appear with
+        a "(partial)" suffix so the user knows they're not
+        universal across the selection.
+        """
 
-        self.current_media = (
-            media
-        )
+        self.current_media_list = media_list or []
 
         self.image_tags_combo.clear()
         self.image_tags_combo.addItem("")
 
-        if not media:
+        if not self.current_media_list:
             return
 
-        tags = (
-            self.tag_service
-            .get_tags_for_media(
-                media.id
+        count = len(self.current_media_list)
+
+        # Build a dict: tag_display_name -> how many items have it
+        tag_counts = {}
+
+        for media in self.current_media_list:
+
+            tags = (
+                self.tag_service
+                .get_tags_for_media(
+                    media.id
+                )
+            )
+
+            for tag in tags:
+
+                name = tag.display_name
+
+                tag_counts[name] = (
+                    tag_counts.get(name, 0) + 1
+                )
+
+        # Sort: system tags first, then alpha (mirrors tag_service)
+        all_tag_names = sorted(
+            tag_counts.keys(),
+            key=lambda n: (
+                not any(
+                    t.is_system
+                    for media in self.current_media_list
+                    for t in self.tag_service.get_tags_for_media(
+                        media.id
+                    )
+                    if t.display_name == n
+                ),
+                n
             )
         )
 
-        for tag in tags:
+        for name in all_tag_names:
 
-            self.image_tags_combo.addItem(
-                tag.display_name
-            )
+            c = tag_counts[name]
+
+            if c == count:
+                # All selected items have this tag
+                self.image_tags_combo.addItem(name)
+            else:
+                # Only some items have it
+                self.image_tags_combo.addItem(
+                    f"{name} (partial {c}/{count})"
+                )
 
     # =====================================================
-    # ADD TAG
+    # GET SELECTED TAG NAME (strips "(partial ...)" suffix)
+    # =====================================================
+    def _get_selected_image_tag_name(self):
+        """
+        Returns the clean tag name from the Image Tags combo,
+        stripping the "(partial N/M)" suffix if present.
+        """
+
+        raw = self.image_tags_combo.currentText().strip()
+
+        if " (partial " in raw:
+            return raw.split(" (partial ")[0].strip()
+
+        return raw
+
+    # =====================================================
+    # ADD TAG (to all selected items)
     # =====================================================
     def add_tag(self):
 
-        if not self.current_media:
-            return
-
-        current_tags = (
-            self.tag_service
-            .get_tags_for_media(
-                self.current_media.id
-            )
-        )
-
-        if len(current_tags) >= 20:
-
-            QMessageBox.warning(
-                self,
-                "Limit",
-                "Max 20 tags per image"
-            )
-
+        if not self.current_media_list:
             return
 
         new_tag = (
@@ -501,12 +541,30 @@ class TagPanel(QWidget):
         if not tag_name:
             return
 
-        success = self.tag_service.add_tag_to_media(
-            self.current_media,
-            tag_name
-        )
+        affected_ids = []
+        reserved_error = False
 
-        if not success:
+        for media in self.current_media_list:
+
+            current_tags = (
+                self.tag_service
+                .get_tags_for_media(media.id)
+            )
+
+            if len(current_tags) >= 20:
+                continue
+
+            success = self.tag_service.add_tag_to_media(
+                media,
+                tag_name
+            )
+
+            if success:
+                affected_ids.append(media.id)
+            else:
+                reserved_error = True
+
+        if reserved_error and not affected_ids:
 
             QMessageBox.information(
                 self,
@@ -522,37 +580,53 @@ class TagPanel(QWidget):
 
         self.load_tags()
 
-        self.set_selected_media(
-            self.current_media
+        self.set_selected_media_list(
+            self.current_media_list
         )
 
-        self.tagChanged.emit(
-            self.current_media.id
-        )
+        if affected_ids:
+            self.tagChanged.emit(affected_ids)
 
     # =====================================================
-    # REMOVE TAG
+    # REMOVE TAG (from all selected items that have it)
     # =====================================================
     def remove_tag(self):
 
-        if not self.current_media:
+        if not self.current_media_list:
             return
 
-        tag_name = (
-            self.image_tags_combo
-            .currentText()
-            .strip()
-        )
+        tag_name = self._get_selected_image_tag_name()
 
         if not tag_name:
             return
 
-        success = self.tag_service.remove_tag_from_media(
-            self.current_media,
-            tag_name
-        )
+        affected_ids = []
+        protected_error = False
 
-        if not success:
+        for media in self.current_media_list:
+
+            # Only attempt removal from items that have this tag
+            existing = [
+                t.display_name
+                for t in self.tag_service.get_tags_for_media(
+                    media.id
+                )
+            ]
+
+            if tag_name not in existing:
+                continue
+
+            success = self.tag_service.remove_tag_from_media(
+                media,
+                tag_name
+            )
+
+            if success:
+                affected_ids.append(media.id)
+            else:
+                protected_error = True
+
+        if protected_error and not affected_ids:
 
             QMessageBox.information(
                 self,
@@ -563,13 +637,12 @@ class TagPanel(QWidget):
 
             return
 
-        self.set_selected_media(
-            self.current_media
+        self.set_selected_media_list(
+            self.current_media_list
         )
 
-        self.tagChanged.emit(
-            self.current_media.id
-        )
+        if affected_ids:
+            self.tagChanged.emit(affected_ids)
 
     # =====================================================
     # DELETE TAG
@@ -637,8 +710,8 @@ class TagPanel(QWidget):
 
         self.load_tags()
 
-        self.set_selected_media(
-            self.current_media
+        self.set_selected_media_list(
+            self.current_media_list
         )
 
         self.refresh_callback()
