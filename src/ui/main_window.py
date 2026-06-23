@@ -94,6 +94,10 @@ from src.core.services.tag_service import (
     TagService
 )
 
+from src.core.services.tag_category_service import (
+    TagCategoryService
+)
+
 from src.core.services.delete_service import (
     DeleteService
 )
@@ -128,6 +132,10 @@ from src.ui.widgets.video_thumbnail_widget import (
 
 from src.ui.change_password_window import (
     ChangePasswordWindow
+)
+
+from src.ui.tag_category_window import (
+    TagCategoryWindow
 )
 
 
@@ -171,6 +179,10 @@ class MainWindow(QMainWindow):
             TagService()
         )
 
+        self.tag_category_service = (
+            TagCategoryService()
+        )
+
         self.delete_service = (
             DeleteService()
         )
@@ -210,6 +222,25 @@ class MainWindow(QMainWindow):
 
         self.delete_button.clicked.connect(
             self.delete_selected_media
+        )
+
+        # =====================================================
+        # MANAGE CATEGORIES BUTTON (tag icon)
+        # =====================================================
+        self.manage_categories_button = (
+            QToolButton()
+        )
+
+        self.manage_categories_button.setText(
+            "\U0001F3F7"  # 🏷️
+        )
+
+        self.manage_categories_button.setToolTip(
+            "Manage Tag Categories"
+        )
+
+        self.manage_categories_button.clicked.connect(
+            self.open_manage_categories
         )
 
         # =====================================================
@@ -271,6 +302,9 @@ class MainWindow(QMainWindow):
                 tag_service=
                 self.tag_service,
 
+                tag_category_service=
+                self.tag_category_service,
+
                 refresh_callback=
                 self.refresh_current_view
             )
@@ -305,6 +339,10 @@ class MainWindow(QMainWindow):
 
         self.top_bar_layout.addStretch(
             1
+        )
+
+        self.top_bar_layout.addWidget(
+            self.manage_categories_button
         )
 
         self.top_bar_layout.addWidget(
@@ -371,6 +409,7 @@ class MainWindow(QMainWindow):
         self.preview_window = None
         self.video_player_window = None
         self.change_password_window = None
+        self.tag_category_window = None
         self._previous_selected_item = None
         self._selected_items = {}   # {id(item): item} — QListWidgetItem not hashable in PySide6
         self._video_player_open = False
@@ -388,6 +427,35 @@ class MainWindow(QMainWindow):
         self._update_top_bar_for_selection(
             None
         )
+
+    # =====================================================
+    # MANAGE CATEGORIES
+    # =====================================================
+    def open_manage_categories(self):
+
+        if self.tag_category_window is None:
+
+            self.tag_category_window = TagCategoryWindow(
+                tag_service=self.tag_service,
+                tag_category_service=self.tag_category_service
+            )
+
+            self.tag_category_window.categoriesChanged.connect(
+                self._on_categories_changed
+            )
+
+        self.tag_category_window.show()
+        self.tag_category_window.raise_()
+        self.tag_category_window.activateWindow()
+
+    def _on_categories_changed(self):
+        """
+        Called when TagCategoryWindow makes any change.
+        Refreshes the TagPanel dropdowns without reloading
+        the full gallery.
+        """
+
+        self.tag_panel.load_tags()
 
     # =====================================================
     # CHANGE PASSWORD

@@ -12,7 +12,14 @@ from PySide6.QtWidgets import (
     QMessageBox
 )
 
-from PySide6.QtCore import Signal
+from PySide6.QtGui import (
+    QStandardItemModel,
+    QStandardItem,
+    QFont,
+    QAction
+)
+
+from PySide6.QtCore import Signal, Qt
 
 
 class TagPanel(QWidget):
@@ -31,31 +38,23 @@ class TagPanel(QWidget):
     def __init__(
         self,
         tag_service,
+        tag_category_service,
         refresh_callback
     ):
 
         super().__init__()
 
-        self.tag_service = (
-            tag_service
-        )
-
-        self.refresh_callback = (
-            refresh_callback
-        )
+        self.tag_service = tag_service
+        self.tag_category_service = tag_category_service
+        self.refresh_callback = refresh_callback
 
         self.current_media_list = []
-
         self._filter_checkboxes = {}
         self._mode = self.MODE_GENERAL
 
         self.build_ui()
-
         self.load_tags()
-
-        self.set_mode(
-            self.MODE_GENERAL
-        )
+        self.set_mode(self.MODE_GENERAL)
 
     # =====================================================
     # UI
@@ -235,113 +234,178 @@ class TagPanel(QWidget):
         return self._mode
 
     # =====================================================
-    # LOAD GLOBAL TAGS
+    # LOAD GLOBAL TAGS (grouped by category)
     # =====================================================
     def load_tags(self):
 
-        # Preserve the currently selected filter tags
         previously_selected = set(
             self.get_selected_filter_tags()
         )
 
         selected_available = (
-            self.available_tags_combo
-            .currentText()
+            self.available_tags_combo.currentText()
         )
 
         selected_selection_available = (
-            self.selection_available_combo
-            .currentText()
+            self.selection_available_combo.currentText()
         )
-
-        self.available_tags_combo.blockSignals(
-            True
-        )
-
-        self.selection_available_combo.blockSignals(
-            True
-        )
-
-        self.available_tags_combo.clear()
-        self.available_tags_combo.addItem("")
-
-        self.selection_available_combo.clear()
-        self.selection_available_combo.addItem("")
 
         # -------------------------
-        # REBUILD FILTER MENU
+        # Fetch data
+        # -------------------------
+        categories = (
+            self.tag_category_service
+            .get_all_categories()
+        )
+
+        uncategorised = (
+            self.tag_category_service
+            .get_uncategorised_tags()
+        )
+
+        system_tags = [
+            t for t in self.tag_service.get_all_tags()
+            if t.is_system
+        ]
+
+        # -------------------------
+        # Rebuild filter menu (QMenu with submenus per category)
         # -------------------------
         self.filter_menu.clear()
         self._filter_checkboxes = {}
 
-        all_tags = (
-            self.tag_service
-            .get_all_tags()
-        )
-
-        for tag in all_tags:
-
-            # Available (add existing / delete): exclude system tags
-            if not tag.is_system:
-
-                self.available_tags_combo.addItem(
-                    tag.display_name
-                )
-
-                self.selection_available_combo.addItem(
-                    tag.display_name
-                )
-
-            # Filter menu: include everything
-            checkbox = QCheckBox(
-                tag.display_name
-            )
-
+        def _add_filter_tag(tag, menu):
+            checkbox = QCheckBox(tag.display_name)
             checkbox.setChecked(
                 tag.display_name in previously_selected
             )
-
             checkbox.stateChanged.connect(
                 self._on_filter_changed
             )
+            action = QWidgetAction(menu)
+            action.setDefaultWidget(checkbox)
+            menu.addAction(action)
+            self._filter_checkboxes[tag.display_name] = checkbox
 
-            action = QWidgetAction(
-                self.filter_menu
+        # System tags at top (flat)
+        for tag in system_tags:
+            _add_filter_tag(tag, self.filter_menu)
+
+        if system_tags and (categories or uncategorised):
+            self.filter_menu.addSeparator()
+
+        # Categories as submenus
+        for cat in categories:
+            cat_tags = (
+                self.tag_category_service
+                .get_tags_for_category(cat)
             )
+            if not cat_tags:
+                continue
+            submenu = QMenu(cat.display_name, self.filter_menu)
+            for tag in cat_tags:
+                _add_filter_tag(tag, submenu)
+            self.filter_menu.addMenu(submenu)
 
-            action.setDefaultWidget(
-                checkbox
-            )
-
-            self.filter_menu.addAction(
-                action
-            )
-
-            self._filter_checkboxes[
-                tag.display_name
-            ] = checkbox
+        # Uncategorised flat
+        if uncategorised:
+            if categories:
+                self.filter_menu.addSeparator()
+            for tag in uncategorised:
+                _add_filter_tag(tag, self.filter_menu)
 
         self._update_filter_button_text()
 
-        for combo, previous_text in (
+        # -------------------------
+        # Rebuild combos (QStandardItemModel with group headers)
+        # -------------------------
+        for combo, prev_text in (
             (self.available_tags_combo, selected_available),
             (self.selection_available_combo, selected_selection_available),
         ):
-
-            index = combo.findText(
-                previous_text
+            self._rebuild_grouped_combo(
+                combo,
+                categories,
+                uncategorised,
+                prev_text
             )
 
-            if index >= 0:
-                combo.setCurrentIndex(index)
+    # -------------------------
+    # Helper: build grouped combo
+    # -------------------------
+    def _rebuild_grouped_combo(
+        self,
+        combo,
+        categories,
+        uncategorised,
+        restore_text
+    ):
 
-        self.available_tags_combo.blockSignals(
-            False
-        )
+        combo.blockSignals(True)
 
-        self.selection_available_combo.blockSignals(
-            False
-        )
+        model = QStandardItemModel()
+
+        # Empty first item
+        model.appendRow(QStandardItem(""))
+
+        # Categories
+        for cat in categories:
+
+            cat_tags = (
+                self.tag_category_service
+                .get_tags_for_category(cat)
+            )
+
+            if not cat_tags:
+                continue
+
+            # Category header (not selectable)
+            header = QStandardItem(f"── {cat.display_name} ──")
+            header.setEnabled(False)
+            header_font = QFont()
+            header_font.setBold(True)
+            header.setFont(header_font)
+            model.appendRow(header)
+
+            for tag in cat_tags:
+                item = QStandardItem(f"  {tag.display_name}")
+                item.setData(tag.display_name, Qt.UserRole)
+                model.appendRow(item)
+
+        # Uncategorised
+        if uncategorised:
+
+            if categories:
+                sep = QStandardItem("──────────────")
+                sep.setEnabled(False)
+                model.appendRow(sep)
+
+            for tag in uncategorised:
+                item = QStandardItem(tag.display_name)
+                item.setData(tag.display_name, Qt.UserRole)
+                model.appendRow(item)
+
+        combo.setModel(model)
+
+        # Restore previous selection
+        # Tags inside categories have "  " prefix in display
+        # but UserRole stores the clean name
+        restored = False
+
+        for i in range(model.rowCount()):
+            m_item = model.item(i)
+            if m_item is None:
+                continue
+            user_data = m_item.data(Qt.UserRole)
+            if user_data == restore_text:
+                combo.setCurrentIndex(i)
+                restored = True
+                break
+
+        if not restored:
+            combo.setCurrentIndex(0)
+
+        combo.blockSignals(False)
 
     # =====================================================
     # MULTI-TAG FILTER
@@ -481,8 +545,32 @@ class TagPanel(QWidget):
                 )
 
     # =====================================================
-    # GET SELECTED TAG NAME (strips "(partial ...)" suffix)
+    # GET CLEAN TAG NAME FROM COMBO
     # =====================================================
+    def _get_combo_tag_name(self, combo) -> str:
+        """
+        Returns the clean tag name from a grouped combo.
+        Items inside categories have UserRole = clean name.
+        Items without category have display text = clean name.
+        """
+
+        model = combo.model()
+        idx = combo.currentIndex()
+
+        if model is None or idx < 0:
+            return ""
+
+        item = model.item(idx)
+
+        if item is None:
+            return ""
+
+        user_data = item.data(Qt.UserRole)
+
+        if user_data:
+            return str(user_data).strip()
+
+        return combo.currentText().strip()
     def _get_selected_image_tag_name(self):
         """
         Returns the clean tag name from the Image Tags combo,
@@ -512,9 +600,9 @@ class TagPanel(QWidget):
         )
 
         existing_tag = (
-            self.selection_available_combo
-            .currentText()
-            .strip()
+            self._get_combo_tag_name(
+                self.selection_available_combo
+            )
             .lower()
         )
 
@@ -650,9 +738,9 @@ class TagPanel(QWidget):
     def delete_tag(self):
 
         tag_name = (
-            self.available_tags_combo
-            .currentText()
-            .strip()
+            self._get_combo_tag_name(
+                self.available_tags_combo
+            )
         )
 
         if not tag_name:

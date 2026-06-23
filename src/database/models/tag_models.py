@@ -1,4 +1,6 @@
-from sqlalchemy import Column, Integer, String, Boolean
+from sqlalchemy import Column, Integer, String, Boolean, ForeignKey
+from sqlalchemy.orm import relationship
+
 from src.database.db_manager import Base
 
 
@@ -33,6 +35,20 @@ class Tag(Base):
         Boolean,
         nullable=False,
         default=False
+    )
+
+    # Optional category this tag belongs to (nullable).
+    # Each tag belongs to at most one category.
+    category_id = Column(
+        Integer,
+        ForeignKey("tag_categories.id"),
+        nullable=True,
+        default=None
+    )
+
+    category = relationship(
+        "TagCategory",
+        back_populates="tags"
     )
 
     def __repr__(self):
