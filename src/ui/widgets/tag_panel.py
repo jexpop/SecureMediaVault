@@ -108,24 +108,32 @@ class TagPanel(QWidget):
         # =================================================
         # AVAILABLE TAGS (global, general mode - Delete Tag)
         # =================================================
-        self.available_tags_combo = (
-            QComboBox()
+        self.available_tags_button = QToolButton()
+        self.available_tags_button.setText("Select tag...")
+        self.available_tags_button.setPopupMode(
+            QToolButton.InstantPopup
         )
-
-        self.available_tags_combo.setMinimumWidth(
-            160
-        )
+        self.available_tags_button.setMinimumWidth(160)
+        self.available_tags_menu = QMenu(self.available_tags_button)
+        self.available_tags_button.setMenu(self.available_tags_menu)
+        self._selected_delete_tag = ""
 
         # =================================================
         # AVAILABLE TAGS (selection mode - Add Tag)
         # =================================================
-        self.selection_available_combo = (
-            QComboBox()
+        self.selection_available_button = QToolButton()
+        self.selection_available_button.setText("Select tag...")
+        self.selection_available_button.setPopupMode(
+            QToolButton.InstantPopup
         )
-
-        self.selection_available_combo.setMinimumWidth(
-            160
+        self.selection_available_button.setMinimumWidth(160)
+        self.selection_available_menu = QMenu(
+            self.selection_available_button
         )
+        self.selection_available_button.setMenu(
+            self.selection_available_menu
+        )
+        self._selected_add_tag = ""
 
         # =================================================
         # NEW TAG
@@ -183,7 +191,7 @@ class TagPanel(QWidget):
             self.filter_button,
             self.clear_filter_button,
             QLabel("Available:"),
-            self.available_tags_combo,
+            self.available_tags_button,
             self.delete_button,
         ]
 
@@ -198,7 +206,7 @@ class TagPanel(QWidget):
             QLabel("Image Tags:"),
             self.image_tags_combo,
             QLabel("Available:"),
-            self.selection_available_combo,
+            self.selection_available_button,
             QLabel("New:"),
             self.new_tag_input,
             self.add_button,
@@ -242,13 +250,12 @@ class TagPanel(QWidget):
             self.get_selected_filter_tags()
         )
 
-        selected_available = (
-            self.available_tags_combo.currentText()
-        )
+        # Reset available selections (tag may no longer exist)
+        self._selected_add_tag = ""
+        self._selected_delete_tag = ""
 
-        selected_selection_available = (
-            self.selection_available_combo.currentText()
-        )
+        self.selection_available_button.setText("Select tag...")
+        self.available_tags_button.setText("Select tag...")
 
         # -------------------------
         # Fetch data
@@ -317,38 +324,40 @@ class TagPanel(QWidget):
         self._update_filter_button_text()
 
         # -------------------------
-        # Rebuild combos (QStandardItemModel with group headers)
+        # Rebuild Available menus (grouped by category)
         # -------------------------
-        for combo, prev_text in (
-            (self.available_tags_combo, selected_available),
-            (self.selection_available_combo, selected_selection_available),
-        ):
-            self._rebuild_grouped_combo(
-                combo,
-                categories,
-                uncategorised,
-                prev_text
-            )
+        self._build_tag_menu(
+            self.available_tags_menu,
+            categories,
+            uncategorised,
+            self._on_delete_tag_selected
+        )
+
+        self._build_tag_menu(
+            self.selection_available_menu,
+            categories,
+            uncategorised,
+            self._on_add_tag_selected
+        )
 
     # -------------------------
-    # Helper: build grouped combo
+    # Helper: build grouped tag menu (for Available buttons)
     # -------------------------
-    def _rebuild_grouped_combo(
+    def _build_tag_menu(
         self,
-        combo,
+        menu,
         categories,
         uncategorised,
-        restore_text
+        on_select
     ):
+        """
+        Populates a QMenu with tags grouped by category as
+        submenus, and uncategorised tags at the bottom (flat).
+        on_select(tag_name) is called when the user picks a tag.
+        """
 
-        combo.blockSignals(True)
+        menu.clear()
 
-        model = QStandardItemModel()
-
-        # Empty first item
-        model.appendRow(QStandardItem(""))
-
-        # Categories
         for cat in categories:
 
             cat_tags = (
@@ -359,53 +368,28 @@ class TagPanel(QWidget):
             if not cat_tags:
                 continue
 
-            # Category header (not selectable)
-            header = QStandardItem(f"── {cat.display_name} ──")
-            header.setEnabled(False)
-            header_font = QFont()
-            header_font.setBold(True)
-            header.setFont(header_font)
-            model.appendRow(header)
+            submenu = QMenu(cat.display_name, menu)
 
             for tag in cat_tags:
-                item = QStandardItem(f"  {tag.display_name}")
-                item.setData(tag.display_name, Qt.UserRole)
-                model.appendRow(item)
 
-        # Uncategorised
+                action = submenu.addAction(tag.display_name)
+                action.triggered.connect(
+                    lambda checked, n=tag.display_name: on_select(n)
+                )
+
+            menu.addMenu(submenu)
+
         if uncategorised:
 
             if categories:
-                sep = QStandardItem("──────────────")
-                sep.setEnabled(False)
-                model.appendRow(sep)
+                menu.addSeparator()
 
             for tag in uncategorised:
-                item = QStandardItem(tag.display_name)
-                item.setData(tag.display_name, Qt.UserRole)
-                model.appendRow(item)
 
-        combo.setModel(model)
-
-        # Restore previous selection
-        # Tags inside categories have "  " prefix in display
-        # but UserRole stores the clean name
-        restored = False
-
-        for i in range(model.rowCount()):
-            m_item = model.item(i)
-            if m_item is None:
-                continue
-            user_data = m_item.data(Qt.UserRole)
-            if user_data == restore_text:
-                combo.setCurrentIndex(i)
-                restored = True
-                break
-
-        if not restored:
-            combo.setCurrentIndex(0)
-
-        combo.blockSignals(False)
+                action = menu.addAction(tag.display_name)
+                action.triggered.connect(
+                    lambda checked, n=tag.display_name: on_select(n)
+                )
 
     # =====================================================
     # MULTI-TAG FILTER
@@ -545,32 +529,24 @@ class TagPanel(QWidget):
                 )
 
     # =====================================================
-    # GET CLEAN TAG NAME FROM COMBO
+    # AVAILABLE TAG SELECTION CALLBACKS
     # =====================================================
-    def _get_combo_tag_name(self, combo) -> str:
-        """
-        Returns the clean tag name from a grouped combo.
-        Items inside categories have UserRole = clean name.
-        Items without category have display text = clean name.
-        """
+    def _on_add_tag_selected(self, tag_name: str):
 
-        model = combo.model()
-        idx = combo.currentIndex()
+        self._selected_add_tag = tag_name
 
-        if model is None or idx < 0:
-            return ""
+        self.selection_available_button.setText(
+            tag_name or "Select tag..."
+        )
 
-        item = model.item(idx)
+    def _on_delete_tag_selected(self, tag_name: str):
 
-        if item is None:
-            return ""
+        self._selected_delete_tag = tag_name
 
-        user_data = item.data(Qt.UserRole)
+        self.available_tags_button.setText(
+            tag_name or "Select tag..."
+        )
 
-        if user_data:
-            return str(user_data).strip()
-
-        return combo.currentText().strip()
     def _get_selected_image_tag_name(self):
         """
         Returns the clean tag name from the Image Tags combo,
@@ -600,9 +576,8 @@ class TagPanel(QWidget):
         )
 
         existing_tag = (
-            self._get_combo_tag_name(
-                self.selection_available_combo
-            )
+            self._selected_add_tag
+            .strip()
             .lower()
         )
 
@@ -737,11 +712,7 @@ class TagPanel(QWidget):
     # =====================================================
     def delete_tag(self):
 
-        tag_name = (
-            self._get_combo_tag_name(
-                self.available_tags_combo
-            )
-        )
+        tag_name = self._selected_delete_tag.strip()
 
         if not tag_name:
             return
